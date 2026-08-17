@@ -1,6 +1,8 @@
 # 编译产物
 /bin/
 *.exe
+# Java 构建产物（hello-java 示例的 mvn 输出，非源码）
+examples/hello-java/target/
 
 # 运行时数据（项目/运行记录存储）
 /data/store.json
