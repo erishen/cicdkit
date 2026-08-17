@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/erishen/cicdkit/internal/check"
 	"github.com/erishen/cicdkit/internal/build"
+	"github.com/erishen/cicdkit/internal/check"
 	"github.com/erishen/cicdkit/internal/deploy"
 	"github.com/erishen/cicdkit/internal/generate"
 	"github.com/erishen/cicdkit/internal/kb"
@@ -605,11 +605,11 @@ func (s *Server) handleConfigLLM(w http.ResponseWriter, r *http.Request) {
 	}
 	// PUT
 	var body struct {
-		Enabled  bool   `json:"enabled"`
-		BaseURL  string `json:"base_url"`
-		APIKey   string `json:"api_key"`
-		Model    string `json:"model"`
-		System   string `json:"system"`
+		Enabled bool   `json:"enabled"`
+		BaseURL string `json:"base_url"`
+		APIKey  string `json:"api_key"`
+		Model   string `json:"model"`
+		System  string `json:"system"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "配置解析失败: "+err.Error())
@@ -645,16 +645,21 @@ func (s *Server) buildRunLogs(run store.Run) string {
 	b.WriteString(fmt.Sprintf("项目: %s\n运行ID: %s\n状态: %s\n镜像: %s\n触发: %s\n",
 		run.ProjectName, run.ID, run.Status, run.ImageRef, run.Trigger))
 	if run.Log != "" {
-		b.WriteString("\n--- 总日志 ---\n" + run.Log + "\n")
+		b.WriteString("\n--- 总日志 ---\n")
+		b.WriteString(run.Log)
+		b.WriteString("\n")
 	}
 	for _, st := range run.Stages {
 		if st.Status == store.StatusFailed || st.Error != "" {
 			b.WriteString(fmt.Sprintf("\n--- 阶段: %s (状态: %s) ---\n", st.Name, st.Status))
 			if st.Error != "" {
-				b.WriteString("错误: " + st.Error + "\n")
+				b.WriteString("错误: ")
+				b.WriteString(st.Error)
+				b.WriteString("\n")
 			}
 			if st.Log != "" {
-				b.WriteString(st.Log + "\n")
+				b.WriteString(st.Log)
+				b.WriteString("\n")
 			}
 		}
 	}
