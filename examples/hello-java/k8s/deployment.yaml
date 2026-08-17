@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hello-java
+  labels:
+    app: hello-java
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hello-java
+  template:
+    metadata:
+      labels:
+        app: hello-java
+    spec:
+      containers:
+        - name: hello-java
+          # 占位镜像：首次 apply 前需先 docker build 并导入 k3s（如 scripts/import-to-k3s.sh）。
+          # 平台执行 Pipeline / Deploy 时会用 kubectl set image 覆盖为最新构建的本地镜像 tag。
+          image: hello-java:local
+          # 纯本地模式必须 IfNotPresent：k3s 直接用本地已导入镜像，绝不外网 pull
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          env:
+            - name: PORT
+              value: "8080"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hello-java
+  # 必须带 app=<部署名> 标签：平台服务探测按 Service 标签推导可达地址
+  labels:
+    app: hello-java
+spec:
+  # NodePort：本地 k3s 单节点下节点即 localhost，探针可经 localhost:<nodePort> 直达
+  type: NodePort
+  selector:
+    app: hello-java
+  ports:
+    - port: 80
+      targetPort: 8080

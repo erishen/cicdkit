@@ -1,0 +1,6 @@
+target/
+.git
+*.md
+*.iml
+.mvn/
+**/*.class

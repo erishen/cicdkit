@@ -1,0 +1,6 @@
+.git
+*.log
+k8s
+*.md
+bin
+vendor

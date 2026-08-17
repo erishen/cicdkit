@@ -1,0 +1,2 @@
+# 零依赖示例，仅使用 Python 标准库（http.server / socketserver）。
+# 若后续添加依赖，在此声明（每行一个包），并同步 Dockerfile 的 pip install 步骤。

@@ -1,0 +1,13 @@
+{
+  "name": "hello-node",
+  "version": "1.0.0",
+  "private": true,
+  "description": "示例项目：Node.js 零依赖 HTTP 服务，用于演示 cicdkit 的构建 / 发布 / 探针闭环。",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

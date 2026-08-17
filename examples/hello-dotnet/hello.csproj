@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- 容器镜像通常无 ICU 数据，启用不变全球化以缩小体积并避免运行时报错 -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+  <!-- 使用 Microsoft.NET.Sdk.Web：自动引用 Microsoft.AspNetCore.App 框架并启用 ASP.NET Core
+       隐式 using，从而原生支持 Kestrel 在 Linux 监听 0.0.0.0（框架自带的 HttpListener 在 Unix
+       上仅支持 localhost/127.0.0.1 前缀，绑 0.0.0.0 会抛 HttpListenerException(50)）。 -->
+</Project>

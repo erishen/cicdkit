@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# cicdkit pre-commit 密钥扫描钩子
+#
+# 依赖：gitleaks（https://github.com/gitleaks/gitleaks）
+#   macOS 安装：brew install gitleaks
+#   其他平台： go install github.com/gitleaks/gitleaks/v8/cmd/gitleaks@latest
+#
+# 行为：
+#   - gitleaks 已安装 → 扫描「本次暂存」的文件；发现疑似密钥则以非零退出码
+#     阻止提交，并打印定位信息。
+#   - gitleaks 未安装 → 跳过扫描（打印警告，不阻断提交），避免破坏工作流。
+#
+# 启用方式（一次性）：git config core.hooksPath hooks
+# 本文件已纳入版本控制，clone 后执行上述命令即可自动生效。
+
+set -uo pipefail
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+  echo "⚠️  [pre-commit] gitleaks 未安装，已跳过密钥扫描（本次提交未被拦截）。"
+  echo "    安装后本钩子才会真正生效："
+  echo "      macOS:  brew install gitleaks"
+  echo "      其他:   go install github.com/gitleaks/gitleaks/v8/cmd/gitleaks@latest"
+  exit 0
+fi
+
+CONFIG_ARG=()
+if [ -f ".gitleaks.toml" ]; then
+  CONFIG_ARG=(--config .gitleaks.toml)
+fi
+
+echo "🔍 [pre-commit] gitleaks 扫描暂存文件…"
+if gitleaks protect --staged --redact --no-banner "${CONFIG_ARG[@]}"; then
+  echo "✅ [pre-commit] 未发现密钥泄露"
+  exit 0
+else
+  echo ""
+  echo "❌ [pre-commit] 发现疑似密钥 / 敏感信息，已阻止提交。"
+  echo "   请检查上方输出。处理方式："
+  echo "   1) 若确为敏感内容：从暂存区移除（.env / data/store.json 本应被 .gitignore 忽略）。"
+  echo "   2) 若确为误报：在 .gitleaks.toml 的 [allowlist] 增补规则后重试。"
+  echo "   （紧急情况可 git commit --no-verify 跳过，但不建议。）"
+  exit 1
+fi

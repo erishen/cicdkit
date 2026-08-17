@@ -1,0 +1,44 @@
+{
+  "name": "hello-node",
+  "description": "示例项目：Node.js 零依赖 HTTP 服务。方案 B（纯本地、无外部 registry）：本地 docker build 出 hello-node:<timestamp> 镜像，docker save 导入 k3s containerd，再 kubectl set-image 滚动更新。无需任何镜像仓库。",
+  "repository": "https://github.com/erishen/cicdkit",
+  "branch": "main",
+  "build": {
+    "context": "examples/hello-node",
+    "dockerfile": "examples/hello-node/Dockerfile",
+    "image_repo": "hello-node",
+    "tag_strategy": "timestamp",
+    "push": false,
+    "registry": {
+      "server": "",
+      "username": "",
+      "password": ""
+    },
+    "build_args": {
+      "APP_VERSION": "1.0.0"
+    },
+    "platforms": [
+      "linux/amd64"
+    ]
+  },
+  "deploy": {
+    "method": "local-k3s",
+    "kubeconfig": "",
+    "namespace": "default",
+    "manifest_path": "examples/hello-node/k8s/deployment.yaml",
+    "deployment": "hello-node",
+    "container": "hello-node",
+    "k3s_import_cmd": "",
+    "wait": true,
+    "timeout": "120s",
+    "ssh_transfer": true,
+    "ssh_container": "hello-node",
+    "ssh_run_args": "-p 8080:8080 --restart unless-stopped"
+  },
+  "probe": {
+    "enabled": true,
+    "method": "GET",
+    "expected_status": 200,
+    "timeout": "5s"
+  }
+}

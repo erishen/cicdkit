@@ -1,0 +1,47 @@
+{
+  "name": "hello-java",
+  "description": "示例项目：Java (Maven) 最小 HTTP 服务，用于演示「生成缺失文件」——导入时不含 Dockerfile / k8s 清单，点「生成缺失文件」后由平台按 java-maven 生成多阶段 Dockerfile 与 Deployment+Service。",
+  "repository": "https://github.com/erishen/hello-java",
+  "branch": "main",
+  "build": {
+    "context": "examples/hello-java",
+    "dockerfile": "examples/hello-java/Dockerfile",
+    "image_repo": "hello-java",
+    "tag_strategy": "timestamp",
+    "push": false,
+    "registry": {
+      "server": "",
+      "username": "",
+      "password": ""
+    },
+    "build_args": {
+      "APP_VERSION": "1.0.0"
+    },
+    "platforms": [
+      "linux/amd64"
+    ]
+  },
+  "deploy": {
+    "method": "local-k3s",
+    "kubeconfig": "",
+    "namespace": "default",
+    "manifest_path": "examples/hello-java/k8s/deployment.yaml",
+    "deployment": "hello-java",
+    "container": "hello-java",
+    "k3s_import_cmd": "",
+    "wait": true,
+    "timeout": "120s",
+    "ssh_transfer": false,
+    "ssh_container": "",
+    "ssh_run_args": ""
+  },
+  "probe": {
+    "enabled": true,
+    "method": "GET",
+    "expected_status": 200,
+    "timeout": "5s",
+    "urls": {
+      "ssh": "http://localhost:8080"
+    }
+  }
+}

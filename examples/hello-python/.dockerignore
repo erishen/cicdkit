@@ -1,0 +1,7 @@
+.git
+*.log
+k8s
+*.md
+bin
+__pycache__
+*.pyc

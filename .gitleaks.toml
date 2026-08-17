@@ -1,0 +1,31 @@
+# cicdkit 仓库专用 gitleaks 配置
+#
+# 用途：在 pre-commit 钩子里扫描「本次暂存」的文件，阻止真实密钥被提交。
+# 默认规则（useDefault）已覆盖绝大多数密钥格式；下方 [allowlist] 仅放行
+# 本仓库「确定无害」的占位 / 模板内容，避免误报阻断正常提交。
+#
+# 若某次确为误报，在 [allowlist] 增补规则后重新提交即可；
+# 若确为真实密钥，务必先从暂存区移除（.env / data/store.json 已被 .gitignore 忽略）。
+
+title = "cicdkit secrets baseline"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "本仓库已知无害的占位值 / 模板文件，放行以免误报"
+
+# 仅放行「模板」文件（文件本身声明不含真实凭据，可安全提交）
+paths = [
+  '''\.env\.example$''',
+  '''config\.example\.json$''',
+]
+
+# 放行明显是占位符的密钥形态（真实密钥不会被这些模式匹配）
+regexes = [
+  '''sk-(your|example|test|placeholder|demo|x{4,})''',   # sk-your-key-here 等
+  '''(your|example|placeholder|demo)[-_][a-z0-9]+''',     # your-strong-token 等
+  '''<[^>]+>''',                                          # <你的云机公网IP> 等中文占位
+  '''1\.2\.3\.4''',                                        # 文档假 IP
+  '''203\.0\.113\.\d+''',                                  # 文档假 IP（TEST-NET-3）
+]

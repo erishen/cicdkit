@@ -1,0 +1,7 @@
+.git
+target
+*.log
+k8s
+*.md
+bin
+Cargo.lock

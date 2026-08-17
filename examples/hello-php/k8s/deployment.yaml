@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hello-php
+  labels:
+    app: hello-php
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hello-php
+  template:
+    metadata:
+      labels:
+        app: hello-php
+    spec:
+      containers:
+        - name: hello-php
+          # 占位镜像：首次 apply 前需先 docker build + 导入 k3s（见 scripts/import-to-k3s.sh）。
+          # 平台执行 Pipeline / Deploy 时会用 kubectl set image 覆盖为最新构建的本地镜像 tag。
+          image: hello-php:local
+          # 纯本地模式必须 IfNotPresent：k3s 直接用本地已导入的镜像，绝不外网 pull
+          imagePullPolicy: IfNotPresent
+          # PHP 内置服务器监听 8080（与 hello-node / hello-rust 等端口一致）
+          ports:
+            - containerPort: 8080
+          env:
+            - name: APP_VERSION
+              value: "dev"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hello-php
+  # 必须带 app=<部署名> 标签：平台服务探测 probe.go 用 `kubectl get svc -l app=hello-php`
+  # 按 Service 自身标签查找可达地址；缺此标签则推导失败、探针只能 skip。
+  labels:
+    app: hello-php
+spec:
+  # 改为 NodePort：本地 k3s 单节点下，节点即 localhost，探针可经 localhost:<nodePort> 直达，
+  # 满足平台「服务可用性探测」对宿主机可达地址的推导要求（ClusterIP 宿主机不可直连会被 skip）。
+  type: NodePort
+  selector:
+    app: hello-php
+  ports:
+    - port: 8080
+      # PHP 内置服务器监听 8080
+      targetPort: 8080

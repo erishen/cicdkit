@@ -1,0 +1,33 @@
+# 编译产物
+/bin/
+*.exe
+
+# 运行时数据（项目/运行记录存储）
+/data/store.json
+/data/*.json
+
+# 本地配置（含密钥，禁止提交）
+config.json
+*.local.json
+.env
+.env.local
+
+# 个人目标机配置（含真实云主机 IP，禁止提交；通用示例见 project.json）
+examples/hello-cicd/project-tencent-cloud.json
+examples/hello-node/project-tencent-cloud.json
+
+# 日志
+*.log
+
+# 编辑器
+.idea/
+.vscode/
+*.swp
+
+# 系统文件
+.DS_Store
+
+# 前端依赖（Vite 安装产物，非源码）
+cmd/server/web/node_modules/
+# 前端构建产物（由 make build 经 `npm run build` 重新生成，无需提交）
+cmd/server/web/dist/

@@ -1,0 +1,26 @@
+# 密钥 / 本地配置（绝不进构建上下文，避免日后改为 COPY . 时泄漏）
+.env
+.env.local
+config.json
+*.local.json
+data/
+
+# 前端依赖与构建产物（非源码，且体积大）
+cmd/server/web/node_modules/
+cmd/server/web/dist/
+
+# 编译产物
+/bin/
+*.exe
+
+# 版本控制历史（有 .dockerignore 后 Docker 不再自动排除 .git）
+.git
+
+# 编辑器 / 系统文件
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# 日志
+*.log

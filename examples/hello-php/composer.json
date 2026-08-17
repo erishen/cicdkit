@@ -1,0 +1,10 @@
+{
+  "name": "hello-php",
+  "description": "示例项目：PHP 零依赖脚本，用于演示 cicdkit 的构建 / 发布 / 探针闭环。",
+  "require": {},
+  "config": {
+    "platform": {
+      "php": "8.3.8"
+    }
+  }
+}

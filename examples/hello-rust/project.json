@@ -1,0 +1,44 @@
+{
+  "name": "hello-rust",
+  "description": "示例项目：Rust 零依赖 HTTP 服务（仅用标准库）。方案 B（纯本地、无外部 registry）：本地 docker build 出 hello-rust:<timestamp> 镜像，docker save 导入 k3s containerd，再 kubectl set-image 滚动更新。无需任何镜像仓库。",
+  "repository": "https://github.com/erishen/cicdkit",
+  "branch": "main",
+  "build": {
+    "context": "examples/hello-rust",
+    "dockerfile": "examples/hello-rust/Dockerfile",
+    "image_repo": "hello-rust",
+    "tag_strategy": "timestamp",
+    "push": false,
+    "registry": {
+      "server": "",
+      "username": "",
+      "password": ""
+    },
+    "build_args": {
+      "APP_VERSION": "1.0.0"
+    },
+    "platforms": [
+      "linux/amd64"
+    ]
+  },
+  "deploy": {
+    "method": "local-k3s",
+    "kubeconfig": "",
+    "namespace": "default",
+    "manifest_path": "examples/hello-rust/k8s/deployment.yaml",
+    "deployment": "hello-rust",
+    "container": "hello-rust",
+    "k3s_import_cmd": "k3s ctr images import -",
+    "wait": true,
+    "timeout": "120s",
+    "ssh_transfer": true,
+    "ssh_container": "hello-rust",
+    "ssh_run_args": "-p 8080:8080 --restart unless-stopped"
+  },
+  "probe": {
+    "enabled": true,
+    "method": "GET",
+    "expected_status": 200,
+    "timeout": "5s"
+  }
+}
