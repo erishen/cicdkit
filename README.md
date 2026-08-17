@@ -311,7 +311,7 @@ Two ways; UI takes precedence over `.env`:
 
 - After diagnosis you can "✓ Adopt & add to knowledge base": the conclusion is persisted to `data/kb.json`, dedup-merged by "project + stage + normalized error", repeated adoptions accumulate counts.
 - Top bar "📚 Knowledge Base" views all adopted entries, supports **keyword search** and **per-entry removal**.
-- **Reuse**: on diagnosing a similar failure again, if it hits a historical entry the conclusion is reused directly (no model call), the popup is标注 "📚 Reused from knowledge base"; meanwhile "historical similar diagnoses" are shown for reference. Each adoption strengthens that knowledge base entry.
+- **Reuse**: on diagnosing a similar failure again, if it hits a historical entry the conclusion is reused directly (no model call), the popup is labeled "📚 Reused from knowledge base"; meanwhile "historical similar diagnoses" are shown for reference. Each adoption strengthens that knowledge base entry.
 - Repeated "AI Diagnose" on the same failed run returns a cached result (`⚡ Cached result this time`), no model call.
 
 ### Generate Missing Dockerfile / k8s Manifest
