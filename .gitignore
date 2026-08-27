@@ -33,3 +33,4 @@ examples/hello-node/project-tencent-cloud.json
 cmd/server/web/node_modules/
 # 前端构建产物（由 make build 经 `npm run build` 重新生成，无需提交）
 cmd/server/web/dist/
+.serena
