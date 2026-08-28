@@ -27,6 +27,15 @@ jobs:
           cache-dependency-path: cmd/server/web/package-lock.json
 
       # Build the frontend first so that web/dist exists for the Go //go:embed.
+      # The committed lockfile uses the China mirror (registry.npmmirror.com) so the
+      # developer's local `npm ci` works behind the GFW; GitHub runners are in the US,
+      # where registry.npmjs.org is far faster/more reliable. Rewrite tarball hosts
+      # (npmmirror path layout matches npmjs.org exactly — only the host changes,
+      # integrity hashes are untouched, so this is safe).
+      - name: Rewrite lockfile to npmjs.org for CI
+        working-directory: cmd/server/web
+        run: sed -i 's#registry.npmmirror.com#registry.npmjs.org#g' package-lock.json
+
       - name: Build frontend
         working-directory: cmd/server/web
         run: npm ci && npm run build
