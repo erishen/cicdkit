@@ -237,6 +237,10 @@ func detect(base string, files map[string]string) (*ProjectView, []string) {
 	// Language / image repo default.
 	if name, ok := manifestAppName(files, rels); ok && name != "" {
 		p.Build.ImageRepo = name
+		// The project name follows the manifest app name (e.g. package.json
+		// "name" / go.mod module leaf) when present; otherwise it stays the
+		// directory basename (set at init).
+		p.Name = name
 	} else {
 		p.Build.ImageRepo = base
 	}
