@@ -372,3 +372,6 @@ make example     # import the hello-cicd sample project into the running service
 ```
 
 Full usage (OrbStack auto-shared images / pure-k3s import differences, placeholder replacement, triggering Pipeline, importing other-language examples, pushing to a real registry via Plan A, generating missing files, etc.) is in [`examples/README.md`](./examples/README.md).
+
+## Related Articles
+- [cicdkit Engineering Practice: A Local CI/CD Single-Binary Platform Built with Pure Go Standard Library](https://erishen.cn/cicdkit-en/)

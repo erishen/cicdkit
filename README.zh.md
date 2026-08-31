@@ -379,3 +379,5 @@ make example     # 把 hello-cicd 示例项目导入运行中的服务
 
 完整使用说明（含 OrbStack 自动共享镜像 / 纯 k3s 导入差异、占位值替换、触发 Pipeline、其它语言示例导入、方案 A 推真实仓库、生成缺失文件等）见 [`examples/README.md`](./examples/README.md)。
 
+## 相关文章
+- [cicdkit 工程实践：一个用纯 Go 标准库打造的本地 CI/CD 单二进制平台](https://erishen.cn/cicdkit/)
