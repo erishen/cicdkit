@@ -13,6 +13,10 @@ WORKDIR /src
 COPY go.mod ./
 COPY cmd/ ./cmd/
 COPY internal/ ./internal/
+# main.go 的 go:embed all:web/dist 需要 dist；宿主的 dist 已被 .dockerignore
+# 排除（构建产物不进上下文），必须显式从 web 阶段接上，否则 go build 报
+# "pattern all:web/dist: no matching files found"。
+COPY --from=web /web/dist ./cmd/server/web/dist
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/server ./cmd/server
 
 FROM alpine:3.20
