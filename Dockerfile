@@ -20,7 +20,7 @@ COPY --from=web /web/dist ./cmd/server/web/dist
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/server ./cmd/server
 
 FROM alpine:3.20
-RUN apk add --no-cache ca-certificates curl docker-cli \
+RUN apk add --no-cache ca-certificates curl docker-cli docker-cli-buildx openssh-client \
     && curl -fsSLo /usr/local/bin/kubectl \
        "https://dl.k8s.io/release/$(curl -fsSL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" \
     && chmod +x /usr/local/bin/kubectl
