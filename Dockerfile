@@ -20,9 +20,14 @@ COPY --from=web /web/dist ./cmd/server/web/dist
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/server ./cmd/server
 
 FROM alpine:3.20
+ARG TARGETARCH
 RUN apk add --no-cache ca-certificates curl docker-cli docker-cli-buildx openssh-client \
+    && KUBE_ARCH="$(case "${TARGETARCH:-$(uname -m)}" in \
+         x86_64|amd64) echo amd64 ;; \
+         aarch64|arm64) echo arm64 ;; \
+         *) echo amd64 ;; esac)" \
     && curl -fsSLo /usr/local/bin/kubectl \
-       "https://dl.k8s.io/release/$(curl -fsSL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" \
+       "https://dl.k8s.io/release/$(curl -fsSL https://dl.k8s.io/release/stable.txt)/bin/linux/${KUBE_ARCH}/kubectl" \
     && chmod +x /usr/local/bin/kubectl
 WORKDIR /app
 COPY --from=builder /out/server /app/server

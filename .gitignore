@@ -7,6 +7,8 @@ examples/hello-java/target/
 # 运行时数据（项目/运行记录存储）
 /data/store.json
 /data/*.json
+/data-docker
+/data-docker/*.json
 
 # 本地配置（含密钥，禁止提交）
 config.json
