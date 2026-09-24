@@ -118,6 +118,13 @@ type ProbeSpec struct {
 	BodyContains   string            `json:"body_contains,omitempty"`
 	Timeout        string            `json:"timeout,omitempty"` // e.g. "5s"
 
+	// AuthUser/AuthPass is a structured convenience for Basic Auth: when both
+	// are set the probe sends Authorization: Basic <base64(user:pass)> itself,
+	// so operators do not have to hand-roll the header. An explicit
+	// "Authorization" key in Headers still wins (applied afterwards).
+	AuthUser string `json:"auth_user,omitempty"`
+	AuthPass string `json:"auth_pass,omitempty"`
+
 	// URLs overrides the probe target per deploy method, e.g.
 	// {"ssh": "http://1.2.3.4:8080"}. It takes precedence over URL for that
 	// method, so a project published to both a cluster and a bare host can

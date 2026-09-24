@@ -118,6 +118,9 @@ func probeURL(ctx context.Context, method, url string, spec store.ProbeSpec, tim
 			cancel()
 			return store.ProbeResult{Status: "err", Method: method, URL: url, Error: err.Error(), Detail: "构造请求失败"}
 		}
+		if spec.AuthUser != "" && spec.AuthPass != "" {
+			req.SetBasicAuth(spec.AuthUser, spec.AuthPass)
+		}
 		for k, v := range spec.Headers {
 			req.Header.Set(k, v)
 		}
@@ -178,6 +181,18 @@ func parseResponse(method, url string, spec store.ProbeSpec, resp *http.Response
 			res.Detail = fmt.Sprintf("HTTP %d，%dms，响应未包含 %s", resp.StatusCode, res.DurationMs, strconv.Quote(spec.BodyContains))
 		} else {
 			res.Detail = fmt.Sprintf("HTTP %d，期望 %d，%dms", resp.StatusCode, expected, res.DurationMs)
+		}
+		// 401/403 usually means the service is up but wants credentials — point
+		// the operator at the structured Basic Auth fields instead of a dead end.
+		if (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) &&
+			spec.AuthUser == "" && spec.AuthPass == "" {
+			hasAuthHeader := false
+			if spec.Headers != nil {
+				_, hasAuthHeader = spec.Headers["Authorization"]
+			}
+			if !hasAuthHeader {
+				res.Detail += "；服务可能要求认证，请在探针配置 Basic Auth（auth_user/auth_pass）或 Authorization 头"
+			}
 		}
 	}
 	return res
@@ -363,8 +378,8 @@ func firstNodeExternalIP(out string) string {
 		Items []struct {
 			Status struct {
 				Addresses []struct {
-					Type  string `json:"type"`
-					Addr  string `json:"address"`
+					Type string `json:"type"`
+					Addr string `json:"address"`
 				} `json:"addresses"`
 			} `json:"status"`
 		} `json:"items"`
@@ -389,8 +404,8 @@ func firstNodeInternalIP(out string) string {
 		Items []struct {
 			Status struct {
 				Addresses []struct {
-					Type  string `json:"type"`
-					Addr  string `json:"address"`
+					Type string `json:"type"`
+					Addr string `json:"address"`
 				} `json:"addresses"`
 			} `json:"status"`
 		} `json:"items"`

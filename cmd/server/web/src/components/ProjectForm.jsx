@@ -39,7 +39,7 @@ export default function ProjectForm({ project, notes, onSaved, onCancel }) {
       method: 'kubectl-apply', kubeconfig: '', namespace: '', manifest_path: '', deployment: '', container: '',
       chart_path: '', release_name: '', helm_image_key: '', helm_set_image: false, k3s_import_cmd: '', wait: false, timeout: '',
       ssh_host: '', ssh_user: '', ssh_port: '', ssh_key_path: '', ssh_image: '', ssh_container: '', ssh_run_args: '', ssh_probe_port: '', ssh_pull: false, ssh_transfer: false, cloud_provider: '',
-      probe_enabled: false, probe_method: 'GET', probe_url: '', probe_urls: '', probe_headers: '', probe_body: '', probe_expected_status: '', probe_body_contains: '', probe_timeout: '',
+      probe_enabled: false, probe_method: 'GET', probe_url: '', probe_urls: '', probe_headers: '', probe_auth_user: '', probe_auth_pass: '', probe_body: '', probe_expected_status: '', probe_body_contains: '', probe_timeout: '',
     }
     if (!project) return base
     const b = project.build || {}
@@ -66,7 +66,7 @@ export default function ProjectForm({ project, notes, onSaved, onCancel }) {
       wait: !!d.wait, timeout: d.timeout || '',
       probe_enabled: !!pr.enabled, probe_method: pr.method || 'GET', probe_url: pr.url || '',
       probe_urls: pr.urls ? Object.entries(pr.urls).map(([k, v]) => k + '=' + v).join('\n') : '',
-      probe_headers: pr.headers ? Object.entries(pr.headers).map(([k, v]) => k + '=' + v).join('\n') : '',
+      probe_headers: pr.headers ? Object.entries(pr.headers).map(([k, v]) => k + '=' + v).join('\n') : '', probe_auth_user: pr.auth_user || '', probe_auth_pass: pr.auth_pass || '',
       probe_body: pr.body || '', probe_expected_status: pr.expected_status ? String(pr.expected_status) : '',
       probe_body_contains: pr.body_contains || '', probe_timeout: pr.timeout || '',
     }
@@ -188,6 +188,8 @@ export default function ProjectForm({ project, notes, onSaved, onCancel }) {
         url: form.probe_url.trim(),
         urls: parseKV(form.probe_urls),
         headers: parseKV(form.probe_headers),
+        auth_user: form.probe_auth_user.trim(),
+        auth_pass: form.probe_auth_pass.trim(),
         body: form.probe_body,
         expected_status: form.probe_expected_status ? parseInt(form.probe_expected_status, 10) : 0,
         body_contains: form.probe_body_contains.trim(),
@@ -432,9 +434,13 @@ export default function ProjectForm({ project, notes, onSaved, onCancel }) {
               <label>按部署方式覆盖探针 URL（可选，KEY=VAL 每行一个；如 ssh=http://1.2.3.4:8080）
                 <textarea className="input" rows="2" placeholder={'ssh=http://1.2.3.4:8080\nlocal-k3s=http://localhost:30196'} value={form.probe_urls} onChange={set('probe_urls')} />
               </label>
-              <label>请求头 (KEY=VAL 每行一个)
+              <label>请求头 (KEY=VAL 每行一个；若下方已填 Basic Auth 可留空)
                 <textarea className="input" rows="2" placeholder={'Authorization=Bearer xxx'} value={form.probe_headers} onChange={set('probe_headers')} />
               </label>
+              <div className="form-row">
+                <label>Basic Auth 用户名<input className="input" placeholder="admin" value={form.probe_auth_user} onChange={set('probe_auth_user')} /></label>
+                <label>Basic Auth 密码<input className="input" type="password" placeholder="password" value={form.probe_auth_pass} onChange={set('probe_auth_pass')} /></label>
+              </div>
               <label>请求体（POST/PUT 用）
                 <textarea className="input" rows="2" placeholder={'{"key":"value"}'} value={form.probe_body} onChange={set('probe_body')} />
               </label>
