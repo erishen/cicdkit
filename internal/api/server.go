@@ -237,6 +237,12 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 		data = []byte(html)
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// AUTO_TOKEN 的 token 每次进程启动都会变化，且是注入在 index.html 里的：
+	// 一旦浏览器缓存了旧 index.html，加载的就不是带本次 token 的版本，前端
+	// 拿 localStorage 里的旧 token 去请求 → 401 → 弹「请输入 Token」。这里禁止
+	// 缓存 index.html（SPA 入口），确保每次刷新都重新注入最新 token；构建产物
+	// 的静态资源（hash 命名）不受影响仍可长期缓存。
+	w.Header().Set("Cache-Control", "no-store")
 	w.Write(data)
 }
 
