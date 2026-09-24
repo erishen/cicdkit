@@ -21,7 +21,9 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/server ./cmd/serv
 
 FROM alpine:3.20
 ARG TARGETARCH
-RUN apk add --no-cache ca-certificates curl docker-cli docker-cli-buildx openssh-client
+# git: 构建镜像时 tag_strategy=git-sha 需在构建上下文(宿主挂载的工作区)取
+# commit sha，容器无 git 会退化为时间戳 tag，降低可追溯性。
+RUN apk add --no-cache ca-certificates curl git docker-cli docker-cli-buildx openssh-client
 # kubectl 由宿主机预取到仓库根（构建容器出口网络拉 dl.k8s.io / google storage 不稳定，
 # 容器内 25s 仅下到 7.8/54MB 超时），此处直接 COPY 进镜像。当前为 linux/arm64；
 # 若在 amd64 机器构建，请预取对应架构二进制并改下面的文件名。
