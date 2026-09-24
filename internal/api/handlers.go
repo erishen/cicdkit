@@ -939,7 +939,7 @@ func (s *Server) handleTestLLM(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "配置不完整：需 BaseURL / API Key / Model")
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
 	defer cancel()
 	cli := llm.NewClient(cfg)
 	reply, err := cli.Test(ctx)

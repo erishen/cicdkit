@@ -16,14 +16,22 @@ A **zero external dependency** (Go standard library only) single-machine CI/CD m
 
 ```
 cmd/server/main.go          # Entry: embed web assets + start HTTP server
-internal/config             # Config (JSON file + env var overrides)
-internal/store              # Data models + file-based JSON storage (atomic write)
-internal/build              # Docker build / push engine
-internal/deploy             # kubectl / helm release engine
+internal/config             # Config (JSON file + env var overrides) + .env loader
+internal/store              # Data models + file-based JSON storage (atomic write) + validation
+internal/build              # Docker build / push engine (single + multi-arch via buildx)
+internal/deploy             # kubectl / helm / local-k3s / ssh release engines
 internal/pipeline           # Pipeline orchestration (concurrency limit + cancel + live logs)
 internal/api                # REST API + static assets
+internal/scan               # Heuristic project-config scanner (from a source dir)
+internal/generate           # Scaffold missing Dockerfile / k8s manifest
+internal/check              # Dry-run validation (config / docker / kubeconfig / context)
+internal/probe              # HTTP service availability probe (auto-derives URL per deploy method)
+internal/llm                # Optional OpenAI-compatible failure-diagnosis client
+internal/kb                 # Adopted-diagnosis knowledge base (reuse, skip the model call)
 cmd/server/web/            # Vite + React frontend (built dist/ embedded by Go)
 ```
+
+> The `internal/scan`, `internal/generate`, `internal/check`, `internal/probe` packages form the project onboarding + pre-flight layer; `internal/llm` + `internal/kb` form the optional AI diagnosis layer (off unless configured). See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for details.
 
 Data is persisted to a `store.json` file (in-memory + atomic write to `.tmp` then `rename`), no database required.
 

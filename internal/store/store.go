@@ -142,6 +142,7 @@ func (s *jsonStore) backfillLastDeploy() {
 				ImageRef:    d.ImageRef,
 				At:          d.CreatedAt,
 				ProbeStatus: d.Probe.Status,
+				ProbeURL:    d.Probe.URL,
 			}
 		}
 	}
@@ -577,6 +578,7 @@ func (s *jsonStore) SaveDeployment(d Deployment) error {
 					ImageRef:    d.ImageRef,
 					At:          d.CreatedAt,
 					ProbeStatus: d.Probe.Status,
+					ProbeURL:    d.Probe.URL,
 				}
 				break
 			}

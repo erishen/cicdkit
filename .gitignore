@@ -31,6 +31,9 @@ examples/hello-node/project-tencent-cloud.json
 # 系统文件
 .DS_Store
 
+# 预下载的 kubectl 二进制（仅供 Docker 构建 COPY，非源码、体积大，禁止提交）
+kubectl-linux-arm64
+
 # 前端依赖（Vite 安装产物，非源码）
 cmd/server/web/node_modules/
 # 前端构建产物（由 make build 经 `npm run build` 重新生成，无需提交）

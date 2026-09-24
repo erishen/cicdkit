@@ -167,6 +167,11 @@ type LastDeployInfo struct {
 	ImageRef    string    `json:"image_ref,omitempty"`
 	At          time.Time `json:"at"`
 	ProbeStatus string    `json:"probe_status,omitempty"` // ok | err | skip
+	// ProbeURL is the reachable service URL discovered by the post-deploy probe
+	// (e.g. http://localhost:30408 for a NodePort on a local VM cluster). The UI
+	// renders it as a clickable "访问地址" link on the project card when
+	// ProbeStatus == "ok", so operators can jump straight into the live service.
+	ProbeURL string `json:"probe_url,omitempty"`
 }
 
 // StageResult is the outcome of one pipeline stage (build / push / deploy).

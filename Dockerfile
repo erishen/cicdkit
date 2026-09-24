@@ -21,14 +21,12 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/server ./cmd/serv
 
 FROM alpine:3.20
 ARG TARGETARCH
-RUN apk add --no-cache ca-certificates curl docker-cli docker-cli-buildx openssh-client \
-    && KUBE_ARCH="$(case "${TARGETARCH:-$(uname -m)}" in \
-         x86_64|amd64) echo amd64 ;; \
-         aarch64|arm64) echo arm64 ;; \
-         *) echo amd64 ;; esac)" \
-    && curl -fsSLo /usr/local/bin/kubectl \
-       "https://dl.k8s.io/release/$(curl -fsSL https://dl.k8s.io/release/stable.txt)/bin/linux/${KUBE_ARCH}/kubectl" \
-    && chmod +x /usr/local/bin/kubectl
+RUN apk add --no-cache ca-certificates curl docker-cli docker-cli-buildx openssh-client
+# kubectl 由宿主机预取到仓库根（构建容器出口网络拉 dl.k8s.io / google storage 不稳定，
+# 容器内 25s 仅下到 7.8/54MB 超时），此处直接 COPY 进镜像。当前为 linux/arm64；
+# 若在 amd64 机器构建，请预取对应架构二进制并改下面的文件名。
+COPY kubectl-linux-arm64 /usr/local/bin/kubectl
+RUN chmod +x /usr/local/bin/kubectl
 WORKDIR /app
 COPY --from=builder /out/server /app/server
 # 运行时数据（store.json）挂到命名卷；docker 构建通过挂载宿主 /var/run/docker.sock 复用宿主 daemon

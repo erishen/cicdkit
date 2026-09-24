@@ -25,7 +25,7 @@ const METHOD_LABEL = {
 }
 // UI 构建戳：每次前端改动后人工升一位，用于一眼确认浏览器看到的是否为最新版。
 // 后端戳走 /api/version，由后端 BuildStamp 提供。
-const UI_BUILD = '2026-08-16 12:50'
+const UI_BUILD = '2026-09-21 21:55'
 
 // 哨兵是否在视口内（含顶部/底部越界判断），用于首屏/视口未填满时持续追加。
 function inViewport(el) {
@@ -320,6 +320,12 @@ export default function App() {
                     {p.last_deploy.probe_status === 'skip' && <span className="badge badge-queue">探针跳过</span>}
                   </div>
                 )}
+                {p.last_deploy && p.last_deploy.probe_status === 'ok' && p.last_deploy.probe_url && (
+                  <div className="last-deploy">
+                    <span className="muted">访问</span>
+                    <a className="deploy-link" href={p.last_deploy.probe_url} target="_blank" rel="noreferrer">{p.last_deploy.probe_url}</a>
+                  </div>
+                )}
                 <div className="row">
                   <button className="btn btn-sm" onClick={() => triggerAction(p.id, 'build')}>Build</button>
                   <div style={{ position: 'relative', display: 'inline-block' }}>
@@ -440,7 +446,9 @@ export default function App() {
                         探测 {PROBE_LABEL[d.probe.status] || d.probe.status}
                       </span>
                       <span className="dep-sub" style={{ marginLeft: 6 }}>
-                        {d.probe.method || 'GET'} {d.probe.url || ''}
+                        {d.probe.method || 'GET'} {d.probe.url ? (
+                          <a className="deploy-link" href={d.probe.url} target="_blank" rel="noreferrer">{d.probe.url}</a>
+                        ) : ''}
                         {d.probe.status_code ? ' · ' + d.probe.status_code : ''}
                         {typeof d.probe.duration_ms === 'number' ? ' · ' + d.probe.duration_ms + 'ms' : ''}
                       </span>

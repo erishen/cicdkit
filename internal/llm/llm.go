@@ -131,7 +131,7 @@ type Client struct {
 
 // NewClient builds a client with a generous timeout (model calls can be slow).
 func NewClient(c Config) *Client {
-	return &Client{cfg: c, client: &http.Client{Timeout: 90 * time.Second}}
+	return &Client{cfg: c, client: &http.Client{Timeout: 150 * time.Second}}
 }
 
 type chatMessage struct {

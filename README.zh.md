@@ -16,14 +16,22 @@
 
 ```
 cmd/server/main.go          # 入口：embed web 资源 + 启动 HTTP 服务
-internal/config             # 配置（JSON 文件 + 环境变量覆盖）
-internal/store              # 数据模型 + 文件型 JSON 存储（原子写）
-internal/build              # Docker 构建 / 推送引擎
-internal/deploy             # kubectl / helm 发布引擎
+internal/config             # 配置（JSON 文件 + 环境变量覆盖）+ .env 加载
+internal/store              # 数据模型 + 文件型 JSON 存储（原子写）+ 校验
+internal/build              # Docker 构建 / 推送引擎（单架构 + buildx 多架构）
+internal/deploy             # kubectl / helm / local-k3s / ssh 发布引擎
 internal/pipeline           # 流水线编排（并发限制 + 取消 + 实时日志）
 internal/api                # REST API + 静态资源
+internal/scan               # 启发式项目配置扫描（从源码目录推导）
+internal/generate           # 补生成缺失的 Dockerfile / k8s 清单
+internal/check              # 试运行校验（配置 / docker / kubeconfig / 构建上下文）
+internal/probe              # HTTP 服务可用性探测（按部署方式自动推导地址）
+internal/llm                # 可选 OpenAI 兼容失败诊断客户端
+internal/kb                 # 采纳的诊断知识库（复用，省一次模型调用）
 cmd/server/web/            # Vite + React 前端工程（构建产物 dist/ 由 Go 嵌入）
 ```
+
+> `internal/scan`、`internal/generate`、`internal/check`、`internal/probe` 构成项目接入 + 部署前检查层；`internal/llm` + `internal/kb` 构成可选的 AI 诊断层（未配置不启用）。详见 [`ARCHITECTURE.md`](./ARCHITECTURE.md)。
 
 数据以 `store.json` 文件持久化（内存 + 原子写 `.tmp` 再 `rename`），无需数据库。
 

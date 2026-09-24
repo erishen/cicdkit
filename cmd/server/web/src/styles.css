@@ -108,6 +108,10 @@ textarea.input { resize: vertical; font-family: ui-monospace, monospace; }
 .tag-accent { background: #e7f0ff; border-color: #b5d4f4; color: #185fa5; font-weight: 500; }
 .last-deploy { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; font-size: 12px; color: var(--text); }
 
+/* 部署后可点击的「访问地址」链接：项目卡片与部署历史共用，跳转到探针发现的可达服务 URL */
+.deploy-link { color: var(--accent, #2f6fed); text-decoration: none; border-bottom: 1px solid currentColor; word-break: break-all; }
+.deploy-link:hover { text-decoration: none; opacity: .82; }
+
 /* 列表序号（数据编号） + 总数标签 */
 .seq {
   display: inline-flex; align-items: center; justify-content: center;
