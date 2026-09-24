@@ -296,12 +296,16 @@ func sshRunScript(p store.Project, image, remoteTar string, transfer bool) strin
 	// block below frees whichever port it resolves to). Previously a cloud
 	// preset wrote `-p 8080:8080` into SSHRunArgs, which made SSHProbePort a
 	// silent no-op and is why the port looked unchangeable.
+	containerPort := strings.TrimSpace(p.Deploy.SSHContainerPort)
+	if containerPort == "" {
+		containerPort = "8080"
+	}
 	probePort := strings.TrimSpace(p.Deploy.SSHProbePort)
 	if probePort == "" {
 		probePort = "8080"
 	}
 	userArgs := stripPublishFlags(strings.TrimSpace(p.Deploy.SSHRunArgs))
-	args := strings.TrimSpace("-p " + probePort + ":8080 --restart unless-stopped " + userArgs)
+	args := strings.TrimSpace("-p " + probePort + ":" + containerPort + " --restart unless-stopped " + userArgs)
 	// Free any published host ports up front so a redeploy never fails with
 	// "address already in use". A left-over container from an earlier run
 	// (possibly a different name — e.g. a manual `docker run` or a past build)
@@ -318,7 +322,11 @@ func sshRunScript(p store.Project, image, remoteTar string, transfer bool) strin
 	// defaultContainerName; single-quote them so a stray metacharacter in a
 	// future code path can never reach the remote shell as an unquoted word.
 	b.WriteString("docker rm -f '" + c + "' 2>/dev/null || true\n")
-	b.WriteString("docker run -d --name '" + c + "' " + args + " '" + image + "'\n")
+	b.WriteString("docker run -d --name '" + c + "' " + args + " '" + image + "'")
+	if cmd := strings.TrimSpace(p.Deploy.SSHCommand); cmd != "" {
+		b.WriteString(" '" + cmd + "'")
+	}
+	b.WriteString("\n")
 	return b.String()
 }
 

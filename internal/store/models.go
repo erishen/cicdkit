@@ -77,9 +77,11 @@ type DeploySpec struct {
 	// from CICD_SSH_HOST / deploy.ssh_host, port from here / CICD_SSH_PROBE_PORT,
 	// default 8080). Keeping it here means the real host IP never has to be
 	// hardcoded in the project JSON — operators store it only in .env.
-	SSHProbePort string `json:"ssh_probe_port,omitempty"`
-	SSHPull      bool   `json:"ssh_pull,omitempty"`
-	SSHTransfer  bool   `json:"ssh_transfer,omitempty"`
+	SSHProbePort  string `json:"ssh_probe_port,omitempty"`
+	SSHContainerPort string `json:"ssh_container_port,omitempty"` // 容器内端口（默认 8080），与 EXPOSE 对齐
+	SSHCommand    string `json:"ssh_command,omitempty"`          // 容器启动命令覆盖（docker run 末尾追加）
+	SSHPull       bool   `json:"ssh_pull,omitempty"`
+	SSHTransfer   bool   `json:"ssh_transfer,omitempty"`
 	// SSHBuildPlatforms overrides Build.Platforms when this run deploys via
 	// ssh_transfer to a host of a different architecture (e.g. building on an
 	// Apple-Silicon Mac for an amd64 bare host). Without it the arm64 image is

@@ -208,6 +208,11 @@ func validateSSH(spec DeploySpec) error {
 			return fmt.Errorf("deploy.ssh_port / CICD_SSH_PORT 非法（应为数字）: %q", port)
 		}
 	}
+	if port := sshEnvOr(spec.SSHContainerPort, "CICD_SSH_CONTAINER_PORT", ""); port != "" {
+		if _, err := strconv.Atoi(port); err != nil {
+			return fmt.Errorf("deploy.ssh_container_port / CICD_SSH_CONTAINER_PORT 非法（应为数字）: %q", port)
+		}
+	}
 	// Every value interpolated into the remote docker command must be shell-safe.
 	// We reject quotes, command separators, subshells, globs, redirections,
 	// braces and backslash escapes — anything that could break out of the
@@ -221,6 +226,7 @@ func validateSSH(spec DeploySpec) error {
 		"deploy.ssh_key_path / CICD_SSH_KEY_PATH":    keyPath,
 		"deploy.ssh_run_args / CICD_SSH_RUN_ARGS":    runArgs,
 		"deploy.ssh_image":                          image,
+		"deploy.ssh_command / CICD_SSH_COMMAND":     sshEnvOr(spec.SSHCommand, "CICD_SSH_COMMAND", ""),
 	} {
 		if strings.ContainsAny(val, shellMetachars) {
 			return fmt.Errorf("%s 含非法字符（不允许 shell 元字符）", field)

@@ -334,6 +334,33 @@ func TestSSHRunScriptProbePortAuthoritative(t *testing.T) {
 	}
 }
 
+func TestSSHRunScriptContainerPort(t *testing.T) {
+	// 默认容器端口 8080（向后兼容）。
+	p := store.Project{ID: "demo", Deploy: store.DeploySpec{SSHProbePort: "18082"}}
+	if !strings.Contains(sshRunScript(p, "img:1", "", false), "docker run -d --name 'demo' -p 18082:8080 --restart unless-stopped 'img:1'") {
+		t.Fatal("默认容器端口应为 8080")
+	}
+	// 自定义容器端口（lume invest 容器内 8082）。
+	p2 := store.Project{ID: "demo", Deploy: store.DeploySpec{SSHProbePort: "18082", SSHContainerPort: "8082"}}
+	if !strings.Contains(sshRunScript(p2, "img:1", "", false), "docker run -d --name 'demo' -p 18082:8082 --restart unless-stopped 'img:1'") {
+		t.Fatalf("SSHContainerPort 应映射容器端口，实际:\n%s", sshRunScript(p2, "img:1", "", false))
+	}
+}
+
+func TestSSHRunScriptCommand(t *testing.T) {
+	// SSHCommand 追加为 docker run 末尾的启动命令。
+	p := store.Project{ID: "demo", Deploy: store.DeploySpec{SSHCommand: "./bin/lume examples/invest.lume"}}
+	script := sshRunScript(p, "img:1", "", false)
+	if !strings.Contains(script, "docker run -d --name 'demo' -p 8080:8080 --restart unless-stopped 'img:1' './bin/lume examples/invest.lume'") {
+		t.Fatalf("SSHCommand 应追加到 docker run 末尾，实际:\n%s", script)
+	}
+	// 空 command 不影响。
+	p2 := store.Project{ID: "demo", Deploy: store.DeploySpec{}}
+	if strings.Contains(sshRunScript(p2, "img:1", "", false), "' '") {
+		t.Fatal("空 command 不应产生多余空格")
+	}
+}
+
 func TestDefaultContainerName(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"", "cicd-app"},
