@@ -59,6 +59,14 @@ func main() {
 	if err != nil {
 		log.Fatalf("打开存储失败: %v", err)
 	}
+	// A previous instance may have been killed mid-pipeline (container
+	// recreate, manual restart): those runs would otherwise show "running"
+	// forever. Flag them failed on startup.
+	if n, err := st.MarkInterruptedRuns("实例重启，运行中断"); err != nil {
+		log.Printf("警告: 清理中断运行失败: %v", err)
+	} else if n > 0 {
+		log.Printf("已将 %d 条中断的运行标记为失败", n)
+	}
 	runner := pipeline.New(cfg, st)
 	sub, err := fs.Sub(webFS, "web/dist")
 	if err != nil {

@@ -32,6 +32,11 @@ type Store interface {
 	// UI "清空运行记录" action; as a safety net it never removes an in-flight
 	// run's eventual SaveRun (the runCtl re-appends it on finish).
 	ClearRuns() error
+	// MarkInterruptedRuns flags every run left in "running" state as failed —
+	// these are pipelines whose process was killed mid-flight (server restart,
+	// container recreate). Without this they would show "running" forever.
+	// Returns how many runs were marked.
+	MarkInterruptedRuns(reason string) (int, error)
 
 	ListDeployments(projectID string) []Deployment
 	SaveDeployment(d Deployment) error
@@ -71,14 +76,14 @@ type ProjectPage struct {
 // dependency-free (no cgo/sqlite) and adequate for a single-node management
 // platform; swap in BoltDB/SQLite behind this same interface for scale.
 type jsonStore struct {
-	mu         sync.RWMutex
-	persistMu  sync.Mutex    // guards flushTimer
-	flushTimer *time.Timer  // pending delayed flush, nil when idle
-	path       string
-	projects   []Project
-	runs       []Run
+	mu          sync.RWMutex
+	persistMu   sync.Mutex  // guards flushTimer
+	flushTimer  *time.Timer // pending delayed flush, nil when idle
+	path        string
+	projects    []Project
+	runs        []Run
 	deployments []Deployment
-	maxRuns    int
+	maxRuns     int
 }
 
 // DefaultMaxRuns is the retained run history size (each run embeds its log).
@@ -339,7 +344,7 @@ func (s *jsonStore) UpdateProject(p Project) error {
 			p.CreatedAt = e.CreatedAt
 			s.projects[i] = p
 			s.persist()
-	return nil
+			return nil
 		}
 	}
 	return fmt.Errorf("项目 %s 不存在", p.ID)
@@ -447,6 +452,29 @@ func (s *jsonStore) SaveRun(r Run) error {
 	}
 	s.persist()
 	return nil
+}
+
+// MarkInterruptedRuns implements Store. Runs left "running" can only mean
+// the executing process died before finish() — record them as failed so the
+// UI does not show them as in-flight forever.
+func (s *jsonStore) MarkInterruptedRuns(reason string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	marked := 0
+	for i := range s.runs {
+		if s.runs[i].Status == StatusRunning {
+			r := s.runs[i]
+			r.Status = StatusFailed
+			r.EndedAt = time.Now()
+			r.Log += reason + "\n"
+			s.runs[i] = r
+			marked++
+		}
+	}
+	if marked > 0 {
+		s.persist()
+	}
+	return marked, nil
 }
 
 // SetMaxRuns bounds how much run history is retained. Runs carry their full log,

@@ -104,6 +104,28 @@ func TestTrimRunsKeepsNewestAndInFlight(t *testing.T) {
 	}
 }
 
+func TestMarkInterruptedRunsFlagsOnlyRunning(t *testing.T) {
+	st := newTestStore(t)
+	now := time.Now()
+	mustSave(t, st, Run{ID: "r-running", ProjectID: "p", Status: StatusRunning, CreatedAt: now})
+	mustSave(t, st, Run{ID: "r-success", ProjectID: "p", Status: StatusSuccess, CreatedAt: now})
+	n, err := st.MarkInterruptedRuns("实例重启，运行中断")
+	if err != nil {
+		t.Fatalf("MarkInterruptedRuns: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("应标记 1 条，实际 %d", n)
+	}
+	if r, ok := st.GetRun("r-running"); !ok || r.Status != StatusFailed {
+		t.Fatalf("r-running 应被标记为 failed，实际 %s", r.Status)
+	} else if r.Log == "" {
+		t.Fatal("failed 的 run 应写入中断原因")
+	}
+	if r, ok := st.GetRun("r-success"); !ok || r.Status != StatusSuccess {
+		t.Fatalf("r-success 不应被改动，实际 %s", r.Status)
+	}
+}
+
 func TestSaveRunUpdateDoesNotDuplicate(t *testing.T) {
 	st := newTestStore(t)
 	r := Run{ID: "r1", ProjectID: "p", Status: StatusRunning, CreatedAt: time.Now()}
