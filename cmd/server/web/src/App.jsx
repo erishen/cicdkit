@@ -79,6 +79,14 @@ function useInfiniteSentinel(loadMore, hasMore, onBusy) {
 
 export default function App() {
   const [projects, setProjects] = useState([])
+  // Per-project trigger guard: a request in flight, plus a short cooldown
+  // after each successful trigger, so rapid double-clicks cannot launch a
+  // burst of concurrent pipelines against the same project.
+  const [cooldowns, setCooldowns] = useState({})
+  const inFlight = useRef({})
+  const blockProject = (id) => { inFlight.current[id] = true; setCooldowns(c => ({ ...c, [id]: Date.now() + 15000 })) }
+  const releaseProject = (id) => { delete inFlight.current[id] }
+  const isTriggerBlocked = (id) => !!inFlight.current[id] || (cooldowns[id] || 0) > Date.now()
   const [filter, setFilter] = useState('')
   const [health, setHealth] = useState('连接中…')
   const [healthCls, setHealthCls] = useState('badge-unknown')
@@ -221,18 +229,23 @@ export default function App() {
   }, [checkHealth, loadProjects, loadRuns, loadDeployments])
 
   const triggerAction = async (id, action, body) => {
+    if (isTriggerBlocked(id)) return
+    blockProject(id)
     try {
       const run = await API.trigger(id, action, body || {})
       showToast(ACTION_LABEL[action] + ' 已触发: ' + run.id, 'ok')
       setLogRun(run.id)
       loadRuns(); loadDeployments()
     } catch (e) { showToast('触发失败: ' + e.message, 'err') }
+    finally { releaseProject(id) }
   }
 
   // 按命名目标发布：优先复用最近一次成功构建的镜像（deploy，不重编）；若该目标
   // 尚未构建过任何镜像，则回退为完整流水线（pipeline，先构建再发布）。这样同架构
   // 的多个目标（如腾讯云→阿里云）共用一份本地镜像，无需重复编译。
   const deployToTarget = async (id, target) => {
+    if (isTriggerBlocked(id)) return
+    blockProject(id)
     setPubMenu(null)
     try {
       const run = await API.trigger(id, 'deploy', { target })
@@ -247,6 +260,7 @@ export default function App() {
       showToast('已触发（先构建再发布）: ' + run.id, 'ok')
       setLogRun(run.id); loadRuns(); loadDeployments()
     } catch (e2) { showToast('触发失败: ' + e2.message, 'err') }
+    finally { releaseProject(id) }
   }
 
   const deleteProject = async (id) => {
@@ -327,21 +341,21 @@ export default function App() {
                   </div>
                 )}
                 <div className="row">
-                  <button className="btn btn-sm" onClick={() => triggerAction(p.id, 'build')}>Build</button>
+                  <button className="btn btn-sm" disabled={isTriggerBlocked(p.id)} onClick={() => triggerAction(p.id, 'build')}>{isTriggerBlocked(p.id) ? '触发中…' : 'Build'}</button>
                   <div style={{ position: 'relative', display: 'inline-block' }}>
-                    <button className="btn btn-sm btn-primary" onClick={() => setPubMenu(pubMenu === p.id ? null : p.id)}>发布 ▾</button>
+                    <button className="btn btn-sm btn-primary" disabled={isTriggerBlocked(p.id)} onClick={() => setPubMenu(pubMenu === p.id ? null : p.id)}>{isTriggerBlocked(p.id) ? '触发中…' : '发布 ▾'}</button>
                     {pubMenu === p.id && (
                       <div style={{ position: 'absolute', zIndex: 30, top: '100%', left: 0, marginTop: 4, background: 'var(--surface, #fff)', border: '1px solid #d8dde3', borderRadius: 6, boxShadow: '0 6px 18px rgba(0,0,0,.14)', minWidth: 188, overflow: 'hidden' }}>
                         {/* 单一有序列表：主方法排在最前（带「主」标记），其后按声明顺序列出命名目标，
                             不再用「命名发布目标」分隔标题，使发布目标整体按工作流顺序呈现。 */}
                         {p.deploy?.method && (
                           <button className="split-item" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', textAlign: 'left', padding: '8px 12px', border: 0, background: 'transparent', cursor: 'pointer', fontSize: 13 }} onClick={() => { setPubMenu(null); triggerAction(p.id, 'pipeline', { method: p.deploy.method }) }}>
-                            <span>发布到 {METHOD_LABEL[p.deploy.method] || p.deploy.method}</span>
+                            <span>{isTriggerBlocked(p.id) ? '触发中…' : '发布到 '}发布到 {METHOD_LABEL[p.deploy.method] || p.deploy.method}</span>
                             <span style={{ fontSize: 10, color: 'var(--accent, #2f6fed)', border: '1px solid currentColor', borderRadius: 4, padding: '0 4px', lineHeight: '14px' }}>主</span>
                           </button>
                         )}
                         {p.targets && p.targets.map((t) => (
-                          <button key={t.name} className="split-item" style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 12px', border: 0, borderTop: '1px solid #eef1f4', background: 'transparent', cursor: 'pointer', fontSize: 13 }} onClick={() => deployToTarget(p.id, t.name)}>发布到 {t.name}</button>
+                          <button key={t.name} className="split-item" style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 12px', border: 0, borderTop: '1px solid #eef1f4', background: 'transparent', cursor: 'pointer', fontSize: 13 }} onClick={() => deployToTarget(p.id, t.name)} disabled={isTriggerBlocked(p.id)}>{isTriggerBlocked(p.id) ? '触发中…' : '发布到 '}{t.name}</button>
                         ))}
                       </div>
                     )}
