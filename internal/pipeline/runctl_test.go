@@ -45,6 +45,7 @@ func (c *countingStore) SaveDeployment(store.Deployment) error        { return n
 func (c *countingStore) GetDeployment(string) (store.Deployment, bool) { return store.Deployment{}, false }
 func (c *countingStore) ClearRuns() error                              { return nil }
 func (c *countingStore) ClearDeployments() error                      { return nil }
+func (c *countingStore) MarkInterruptedRuns(string) (int, error)      { return 0, nil }
 func (c *countingStore) ListRunsPaged(string, int, int) store.RunPage            { return store.RunPage{} }
 func (c *countingStore) ListDeploymentsPaged(string, int, int) store.DeploymentPage { return store.DeploymentPage{} }
 func (c *countingStore) ListProjectsPaged(string, int, int) store.ProjectPage { return store.ProjectPage{} }
