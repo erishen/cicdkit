@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -31,7 +32,9 @@ func main() {
 	// Load .env (and .env.local) so SSH connection secrets can live in a file
 	// instead of the project JSON / UI form. Real environment variables win over
 	// the file. Must run before config.Load so applyEnv can also see these vars.
-	if err := config.LoadDotEnv(); err != nil {
+	// The -config file's directory (typically the persistent data dir in
+	// containers) is searched as a fallback so /app/data/.env works there.
+	if err := config.LoadDotEnv(filepath.Dir(*configPath)); err != nil {
 		log.Printf("加载 .env 失败 (忽略): %v", err)
 	}
 

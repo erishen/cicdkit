@@ -12,15 +12,17 @@ import (
 // `.env.local`, which takes precedence over `.env`). It searches a few
 // candidate directories so the file is found regardless of the process working
 // directory: the current directory, the executable's directory, and its parent
-// (the binary usually lives in ./bin). Keys already present in the real process
-// environment always win, so CI or container-injected env is never clobbered by
-// a file.
+// (the binary usually lives in ./bin). Callers may pass extraDirs (e.g. the
+// -config file's directory) to widen the search — in containers the config dir
+// is typically the only bind-mounted, persistent location. Keys already present
+// in the real process environment always win, so CI or container-injected env
+// is never clobbered by a file.
 //
 // Only a deliberately small, safe subset of dotenv is supported: KEY=VALUE
 // lines, `#` comments, blank lines, and optional single/double quoting of the
 // value. No variable expansion or shell interpolation is performed — these files
 // hold connection secrets, so parsing stays dumb and predictable.
-func LoadDotEnv() error {
+func LoadDotEnv(extraDirs ...string) error {
 	// Snapshot the real process environment so neither file can override it,
 	// while still letting .env.local override .env.
 	processKeys := map[string]bool{}
@@ -31,9 +33,11 @@ func LoadDotEnv() error {
 	}
 
 	var loaded []string
+	dirs := candidateDirs()
+	dirs = append(dirs, extraDirs...)
 	for _, name := range []string{".env", ".env.local"} {
 		found := false
-		for _, dir := range candidateDirs() {
+		for _, dir := range dirs {
 			p := filepath.Join(dir, name)
 			if _, err := os.Stat(p); err != nil {
 				continue // not in this candidate dir; try the next

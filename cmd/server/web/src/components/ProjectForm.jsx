@@ -93,6 +93,12 @@ export default function ProjectForm({ project, notes, onSaved, onCancel }) {
   const [err, setErr] = useState('')
   // Lazily opened "manage deploy targets" modal — keeps the main form short.
   const [showTargets, setShowTargets] = useState(false)
+  // Per-vendor SSH hosts from .env (GET /api/config/ssh-defaults → providers),
+  // used to pre-fill ssh_host when the operator picks a cloud vendor.
+  const [sshDef, setSshDef] = useState(null)
+  useEffect(() => { API.sshDefaults().then(setSshDef).catch(() => {}) }, [])
+  // .env 里配的云厂商 IP：CICD_SSH_HOST_<PROVIDER>（providers map）。
+  const cloudHost = (v) => (sshDef && sshDef.providers && sshDef.providers[v]) || ''
 
   // True when this is a scanned draft whose context still needs the absolute path.
   const ctxMissing = !!project && !form.context.trim()
@@ -125,10 +131,13 @@ export default function ProjectForm({ project, notes, onSaved, onCancel }) {
     didInitTargets.current = true
     if (targets.length > 0) return
     API.sshDefaults().then((d) => {
-      if (!d || !d.host) return
+      if (!d) return
+      // 优先厂商级 IP（CICD_SSH_HOST_TENCENT），回落到旧的单一 CICD_SSH_HOST。
+      const host = (d.providers && d.providers.tencent) || d.host || ''
+      if (!host) return
       setTargets((ts) => [...ts, {
         name: '腾讯云', method: 'ssh', cloud_provider: 'tencent',
-        ssh_host: d.host || '', ssh_user: d.user || '', ssh_port: d.port || '',
+        ssh_host: host, ssh_user: d.user || '', ssh_port: d.port || '',
         ssh_key_path: d.key_path || '',
         ssh_image: '', ssh_container: '', ssh_run_args: '', ssh_probe_port: '', ssh_container_port: '',
         ssh_pull: false, ssh_transfer: false,
@@ -349,6 +358,8 @@ export default function ProjectForm({ project, notes, onSaved, onCancel }) {
                           if (preset) {
                             setForm((f) => ({
                               ...f,
+                              // .env 配过该厂商 IP（CICD_SSH_HOST_*）且主机为空时才预填，不覆盖手填值
+                              ssh_host: f.ssh_host ? f.ssh_host : cloudHost(v),
                               ssh_port: preset.port || f.ssh_port,
                               ssh_user: preset.user || f.ssh_user,
                               ssh_probe_port: preset.probe_port || f.ssh_probe_port,
@@ -499,7 +510,10 @@ export default function ProjectForm({ project, notes, onSaved, onCancel }) {
                             const preset = CLOUD_PRESETS[v]
                             if (preset) {
                               setTargets((ts) => ts.map((x, j) => j === i
-                                ? { ...x, ssh_port: preset.port || x.ssh_port, ssh_user: preset.user || x.ssh_user, ssh_probe_port: preset.probe_port || x.ssh_probe_port }
+                                ? { ...x,
+                                    // .env 配过该厂商 IP 且主机为空时才预填，不覆盖手填值
+                                    ssh_host: x.ssh_host ? x.ssh_host : cloudHost(v),
+                                    ssh_port: preset.port || x.ssh_port, ssh_user: preset.user || x.ssh_user, ssh_probe_port: preset.probe_port || x.ssh_probe_port }
                                 : x))
                             }
                           }}

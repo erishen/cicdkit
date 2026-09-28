@@ -168,13 +168,33 @@ func (s *Server) handleConfigSSHDefaults(w http.ResponseWriter, r *http.Request)
 		}
 		return d
 	}
-	writeJSON(w, http.StatusOK, map[string]string{
+	// Per-provider hosts from .env: CICD_SSH_HOST_<PROVIDER> (e.g. ..._TENCENT,
+	// ..._ALIBABA). ALIYUN is accepted as an alias for ALIBABA since that is how
+	// the vendor is commonly written. The legacy single CICD_SSH_HOST stays
+	// untouched (probe URL derivation + the "腾讯云" preset keep working).
+	provHost := func(p string) string {
+		if v := envOr("CICD_SSH_HOST_"+strings.ToUpper(p), ""); v != "" {
+			return v
+		}
+		if p == "alibaba" {
+			return envOr("CICD_SSH_HOST_ALIYUN", "")
+		}
+		return ""
+	}
+	providers := map[string]string{}
+	for _, p := range []string{"tencent", "alibaba", "aws", "huawei"} {
+		if h := provHost(p); h != "" {
+			providers[p] = h
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
 		"host":            envOr("CICD_SSH_HOST", ""),
 		"user":            envOr("CICD_SSH_USER", ""),
 		"port":            envOr("CICD_SSH_PORT", ""),
 		"key_path":        envOr("CICD_SSH_KEY_PATH", ""),
 		"build_platforms": envOr("CICD_SSH_BUILD_PLATFORMS", ""),
 		"label":           "腾讯云（来自 .env CICD_SSH_*）",
+		"providers":       providers,
 	})
 }
 
