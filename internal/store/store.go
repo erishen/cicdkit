@@ -224,6 +224,17 @@ func (s *jsonStore) Flush() {
 // snapshot, and rename is atomic. Errors go to stderr so they're visible
 // without failing the in-memory mutation.
 func (s *jsonStore) flushNow() {
+	// Clear the pending-flush marker BEFORE writing. flushNow runs as the
+	// AfterFunc callback, and persist() only schedules a new flush when
+	// flushTimer is nil — without this reset the first delayed flush would
+	// leave the marker set forever and every later mutation would silently
+	// skip persistence until process exit (the one-flush-per-lifetime bug).
+	s.persistMu.Lock()
+	if s.flushTimer != nil {
+		s.flushTimer.Stop()
+		s.flushTimer = nil
+	}
+	s.persistMu.Unlock()
 	if dir := filepath.Dir(s.path); dir != "" {
 		_ = os.MkdirAll(dir, 0o755)
 	}

@@ -447,3 +447,34 @@ func TestListDeploymentsPagedDisjointWithNullCreatedAt(t *testing.T) {
 		t.Fatalf("去重后可见 %d 条, want %d（分页重叠导致丢失）", len(seen), n)
 	}
 }
+
+// TestFlushRepeatsAfterDebouncedFlush 回归：flushNow 作为 AfterFunc 回调执行
+// 后必须把 flushTimer 复位为 nil，否则 persist() 再也不调度，进程一生只在
+// 第一次防抖窗口落盘一次，之后的全部变更静默滞留内存（曾在生产表现为
+// store.json 的 mtime 停在进程启动时刻、当天的项目/运行全部未落盘）。
+func TestFlushRepeatsAfterDebouncedFlush(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "store.json")
+	st, err := NewJsonStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateProject(Project{ID: "p1", Name: "first", CreatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	// 等 200ms 防抖窗口过去，让第一次 flushNow 自然触发（不走 Flush）。
+	time.Sleep(persistDelay + 100*time.Millisecond)
+
+	if err := st.CreateProject(Project{ID: "p2", Name: "second", CreatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	// 不调用 Flush：第二次变更也必须经自然防抖落到磁盘。
+	time.Sleep(persistDelay + 100*time.Millisecond)
+
+	reopened, err := NewJsonStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := reopened.GetProject("p2"); !ok {
+		t.Fatal("第二次变更未落盘：防抖 flush 后 flushTimer 未复位（一次性落盘 bug 回归）")
+	}
+}
