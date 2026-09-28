@@ -38,7 +38,7 @@ export default function ProjectForm({ project, notes, onSaved, onCancel }) {
       context: '.', dockerfile: 'Dockerfile', image_repo: '', tag_strategy: 'timestamp', push: false, build_args: '',
       method: 'kubectl-apply', kubeconfig: '', namespace: '', manifest_path: '', deployment: '', container: '',
       chart_path: '', release_name: '', helm_image_key: '', helm_set_image: false, k3s_import_cmd: '', wait: false, timeout: '',
-      ssh_host: '', ssh_user: '', ssh_port: '', ssh_key_path: '', ssh_image: '', ssh_container: '', ssh_run_args: '', ssh_probe_port: '', ssh_pull: false, ssh_transfer: false, cloud_provider: '',
+      ssh_host: '', ssh_user: '', ssh_port: '', ssh_key_path: '', ssh_image: '', ssh_container: '', ssh_run_args: '', ssh_probe_port: '', ssh_container_port: '', ssh_pull: false, ssh_transfer: false, cloud_provider: '',
       probe_enabled: false, probe_method: 'GET', probe_url: '', probe_urls: '', probe_headers: '', probe_auth_user: '', probe_auth_pass: '', probe_body: '', probe_expected_status: '', probe_body_contains: '', probe_timeout: '',
     }
     if (!project) return base
@@ -62,7 +62,7 @@ export default function ProjectForm({ project, notes, onSaved, onCancel }) {
       k3s_import_cmd: d.k3s_import_cmd || '',
       ssh_host: d.ssh_host || '', ssh_user: d.ssh_user || '', ssh_port: d.ssh_port || '',
       ssh_key_path: d.ssh_key_path || '', ssh_image: d.ssh_image || '',
-      ssh_container: d.ssh_container || '', ssh_run_args: d.ssh_run_args || '', ssh_probe_port: d.ssh_probe_port || '', ssh_pull: !!d.ssh_pull, ssh_transfer: !!d.ssh_transfer, cloud_provider: '',
+      ssh_container: d.ssh_container || '', ssh_run_args: d.ssh_run_args || '', ssh_probe_port: d.ssh_probe_port || '', ssh_container_port: d.ssh_container_port || '', ssh_pull: !!d.ssh_pull, ssh_transfer: !!d.ssh_transfer, cloud_provider: '',
       wait: !!d.wait, timeout: d.timeout || '',
       probe_enabled: !!pr.enabled, probe_method: pr.method || 'GET', probe_url: pr.url || '',
       probe_urls: pr.urls ? Object.entries(pr.urls).map(([k, v]) => k + '=' + v).join('\n') : '',
@@ -81,6 +81,7 @@ export default function ProjectForm({ project, notes, onSaved, onCancel }) {
       ssh_host: t.ssh_host || '', ssh_user: t.ssh_user || '', ssh_port: t.ssh_port || '',
       ssh_key_path: t.ssh_key_path || '', ssh_image: t.ssh_image || '', ssh_container: t.ssh_container || '',
       ssh_run_args: t.ssh_run_args || '', ssh_probe_port: t.ssh_probe_port || '',
+      ssh_container_port: t.ssh_container_port || '',
       ssh_pull: !!t.ssh_pull, ssh_transfer: !!t.ssh_transfer,
       kubeconfig: t.kubeconfig || '', namespace: t.namespace || '', manifest_path: t.manifest_path || '',
       deployment: t.deployment || '', container: t.container || '',
@@ -110,7 +111,7 @@ export default function ProjectForm({ project, notes, onSaved, onCancel }) {
   const addTarget = () => setTargets((ts) => [...ts, {
     name: '', method: 'ssh', cloud_provider: 'custom',
     ssh_host: '', ssh_user: '', ssh_port: '', ssh_key_path: '', ssh_image: '',
-    ssh_container: '', ssh_run_args: '', ssh_probe_port: '', ssh_pull: false, ssh_transfer: false,
+    ssh_container: '', ssh_run_args: '', ssh_probe_port: '', ssh_container_port: '', ssh_pull: false, ssh_transfer: false,
     kubeconfig: '', namespace: '', manifest_path: '', deployment: '', container: '',
     chart_path: '', release_name: '', helm_image_key: '', helm_set_image: false, k3s_import_cmd: '',
   }])
@@ -129,7 +130,7 @@ export default function ProjectForm({ project, notes, onSaved, onCancel }) {
         name: '腾讯云', method: 'ssh', cloud_provider: 'tencent',
         ssh_host: d.host || '', ssh_user: d.user || '', ssh_port: d.port || '',
         ssh_key_path: d.key_path || '',
-        ssh_image: '', ssh_container: '', ssh_run_args: '', ssh_probe_port: '',
+        ssh_image: '', ssh_container: '', ssh_run_args: '', ssh_probe_port: '', ssh_container_port: '',
         ssh_pull: false, ssh_transfer: false,
         kubeconfig: '', namespace: '', manifest_path: '', deployment: '', container: '',
         chart_path: '', release_name: '', helm_image_key: '', helm_set_image: false, k3s_import_cmd: '',
@@ -177,6 +178,7 @@ export default function ProjectForm({ project, notes, onSaved, onCancel }) {
         ssh_container: form.ssh_container.trim(),
         ssh_run_args: form.ssh_run_args.trim(),
         ssh_probe_port: form.ssh_probe_port.trim(),
+        ssh_container_port: form.ssh_container_port.trim(),
         ssh_pull: form.ssh_pull,
         ssh_transfer: form.ssh_transfer,
         wait: form.wait,
@@ -218,6 +220,7 @@ export default function ProjectForm({ project, notes, onSaved, onCancel }) {
           ssh_container: t.ssh_container.trim(),
           ssh_run_args: t.ssh_run_args.trim(),
           ssh_probe_port: t.ssh_probe_port.trim(),
+          ssh_container_port: t.ssh_container_port.trim(),
           ssh_pull: t.ssh_pull,
           ssh_transfer: t.ssh_transfer,
         })),
@@ -365,7 +368,8 @@ export default function ProjectForm({ project, notes, onSaved, onCancel }) {
                       <label>主机 <input className="input" placeholder="192.168.1.10 或 example.com" value={form.ssh_host} onChange={set('ssh_host')} /></label>
                       <label>用户 <input className="input" placeholder="root" value={form.ssh_user} onChange={set('ssh_user')} /></label>
                       <label>端口 <input className="input" placeholder="22" value={form.ssh_port} onChange={set('ssh_port')} /></label>
-                      <label>探针端口（宿主发布端口，容器固定 8080）<input className="input" placeholder="8080" value={form.ssh_probe_port} onChange={set('ssh_probe_port')} /></label>
+                      <label>探针端口（宿主发布端口）<input className="input" placeholder="8080" value={form.ssh_probe_port} onChange={set('ssh_probe_port')} /></label>
+                      <label>容器内端口（与 EXPOSE/服务监听对齐，默认 8080）<input className="input" placeholder="8080" value={form.ssh_container_port} onChange={set('ssh_container_port')} /></label>
                     </div>
                     <label>私钥路径（留空用默认 ssh 配置）<input className="input" placeholder="~/.ssh/id_rsa" value={form.ssh_key_path} onChange={set('ssh_key_path')} /></label>
                   </div>
@@ -515,7 +519,8 @@ export default function ProjectForm({ project, notes, onSaved, onCancel }) {
                       <label>镜像（留空=构建出的 image_ref）<input className="input" placeholder="hello-cicd" value={t.ssh_image} onChange={updateTarget(i, 'ssh_image')} /></label>
                       <label>容器名（留空=不命名）<input className="input" placeholder="hello-cicd" value={t.ssh_container} onChange={updateTarget(i, 'ssh_container')} /></label>
                       <label>docker run 额外参数（不含 -p，宿主端口由探针端口决定）<input className="input" placeholder="-e ENV=prod -v /data:/data" value={t.ssh_run_args} onChange={updateTarget(i, 'ssh_run_args')} /></label>
-                      <label>探针端口（宿主发布端口，容器固定 8080）<input className="input" placeholder="8080" value={t.ssh_probe_port} onChange={updateTarget(i, 'ssh_probe_port')} /></label>
+                      <label>探针端口（宿主发布端口）<input className="input" placeholder="8080" value={t.ssh_probe_port} onChange={updateTarget(i, 'ssh_probe_port')} /></label>
+                      <label>容器内端口（与 EXPOSE/服务监听对齐，默认 8080）<input className="input" placeholder="8080" value={t.ssh_container_port} onChange={updateTarget(i, 'ssh_container_port')} /></label>
                       <label className="checkbox"><input type="checkbox" checked={t.ssh_pull} onChange={updateTarget(i, 'ssh_pull')} /> 部署前 docker pull</label>
                     </React.Fragment>
                   )}
