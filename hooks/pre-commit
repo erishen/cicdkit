@@ -15,6 +15,10 @@
 
 set -uo pipefail
 
+# 某些环境（GUI 启动的工具、受限 shell、CI 容器）PATH 可能不含 Homebrew/
+# /usr/local，补齐常见安装位置再探测，避免「明明装了却报未安装」。
+export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/go/bin:$PATH"
+
 if ! command -v gitleaks >/dev/null 2>&1; then
   echo "⚠️  [pre-commit] gitleaks 未安装，已跳过密钥扫描（本次提交未被拦截）。"
   echo "    安装后本钩子才会真正生效："
