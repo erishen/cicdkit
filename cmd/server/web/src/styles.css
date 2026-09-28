@@ -173,6 +173,8 @@ textarea.input { resize: vertical; font-family: ui-monospace, monospace; }
 .modal-head { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border); flex: none; }
 .modal-head h3 { margin: 0; }
 .modal-body { padding: 20px; overflow-y: auto; overscroll-behavior: contain; flex: 1 1 auto; min-height: 0; }
+/* flush：内容自带水平 padding（.probe/.checks 等），去掉外层再包一层时的双倍留白 */
+.modal-body.flush { padding: 0; }
 .scan-notes { background: var(--surface-alt, #f6f8fa); border: 1px solid var(--border);
   border-radius: 10px; padding: 10px 14px; margin-bottom: 14px; font-size: 12px; line-height: 1.6; }
 .scan-notes ul { margin: 6px 0 0; padding-left: 18px; }
@@ -222,6 +224,8 @@ legend { font-weight: 600; padding: 0 6px; font-size: 13px; }
   margin: 0; padding: 16px 20px; font-family: ui-monospace, "SF Mono", Menlo, monospace;
   font-size: 12px; white-space: pre-wrap; word-break: break-word; max-height: 50vh; overflow-y: auto;
   background: #0f172a; color: #e2e8f0;
+  /* 在 modal-card 的 flex 列里弹性收缩，避免 stages+log 撑破卡片 max-height */
+  flex: 1 1 auto; min-height: 0;
 }
 
 /* Toast */

@@ -47,53 +47,56 @@ export default function ProbeModal({ projectId, onClose }) {
           <h3>服务探测 · {projectId}</h3>
           <button className="btn btn-ghost btn-sm" onClick={onClose}>✕</button>
         </div>
-        {err && <div className="empty" style={{ color: 'var(--danger)' }}>{err}</div>}
-        {!result && !err && <div className="empty">探测中…</div>}
+        <div className="modal-body flush">
+          {err && <div className="empty" style={{ color: 'var(--danger)' }}>{err}</div>}
+          {!result && !err && <div className="empty">探测中…</div>}
+          {result && (
+            <div className="probe">
+              <div className={'validate-summary ' + (result.status === 'ok' ? 'ok' : result.status === 'skip' ? 'warn' : 'err')}>
+                <span className="dot" style={{ background: STATUS_DOT[result.status] }} />
+                {STATUS_LABEL[result.status] || result.status} · {result.detail}
+              </div>
+
+              <div className="probe-req">
+                <span className="probe-method">{result.method || 'GET'}</span>
+                <span className="probe-url">{result.url || '（自动推导失败）'}</span>
+              </div>
+
+              <div className="probe-meta">
+                {result.status_code ? <span>状态码 <strong>{result.status_code}</strong></span> : null}
+                {typeof result.duration_ms === 'number' ? <span>耗时 <strong>{result.duration_ms}ms</strong></span> : null}
+                {typeof result.matched === 'boolean' ? <span>内容匹配 <strong>{result.matched ? '是' : '否'}</strong></span> : null}
+              </div>
+
+              {result.error && (
+                <div className="probe-error">{result.error}</div>
+              )}
+
+              {result.headers && Object.keys(result.headers).length > 0 && (
+                <div className="probe-section">
+                  <div className="probe-section-title">响应头</div>
+                  <table className="probe-headers">
+                    <tbody>
+                      {Object.entries(result.headers).map(([k, v]) => (
+                        <tr key={k}><td className="h-k">{k}</td><td className="h-v">{v}</td></tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {result.body ? (
+                <div className="probe-section">
+                  <div className="probe-section-title">响应体</div>
+                  <pre className="probe-body">{result.body}</pre>
+                </div>
+              ) : null}
+            </div>
+          )}
+        </div>
         {result && (
-          <div className="probe">
-            <div className={'validate-summary ' + (result.status === 'ok' ? 'ok' : result.status === 'skip' ? 'warn' : 'err')}>
-              <span className="dot" style={{ background: STATUS_DOT[result.status] }} />
-              {STATUS_LABEL[result.status] || result.status} · {result.detail}
-            </div>
-
-            <div className="probe-req">
-              <span className="probe-method">{result.method || 'GET'}</span>
-              <span className="probe-url">{result.url || '（自动推导失败）'}</span>
-            </div>
-
-            <div className="probe-meta">
-              {result.status_code ? <span>状态码 <strong>{result.status_code}</strong></span> : null}
-              {typeof result.duration_ms === 'number' ? <span>耗时 <strong>{result.duration_ms}ms</strong></span> : null}
-              {typeof result.matched === 'boolean' ? <span>内容匹配 <strong>{result.matched ? '是' : '否'}</strong></span> : null}
-            </div>
-
-            {result.error && (
-              <div className="probe-error">{result.error}</div>
-            )}
-
-            {result.headers && Object.keys(result.headers).length > 0 && (
-              <div className="probe-section">
-                <div className="probe-section-title">响应头</div>
-                <table className="probe-headers">
-                  <tbody>
-                    {Object.entries(result.headers).map(([k, v]) => (
-                      <tr key={k}><td className="h-k">{k}</td><td className="h-v">{v}</td></tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
-            {result.body ? (
-              <div className="probe-section">
-                <div className="probe-section-title">响应体</div>
-                <pre className="probe-body">{result.body}</pre>
-              </div>
-            ) : null}
-
-            <div className="modal-foot">
-              <button className="btn btn-sm" onClick={load}>重新探测</button>
-            </div>
+          <div className="modal-foot">
+            <button className="btn btn-sm" onClick={load}>重新探测</button>
           </div>
         )}
       </div>
