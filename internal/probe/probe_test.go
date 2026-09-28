@@ -157,26 +157,22 @@ func TestFirstNodeExternalIP(t *testing.T) {
 }
 
 func TestResolveURLSSHRequiresManualURL(t *testing.T) {
-	// ssh 不是集群方法，未配置 probe.url，且未设置 CICD_SSH_HOST 环境变量
-	// 时，无法推导探测地址，应跳过并提示在 .env 配置 CICD_SSH_HOST（而非
-	// 旧版的「手动填写 URL」，现在优先从环境变量推导，避免把真实主机 IP
-	// 写死在项目 JSON 里）。
-	t.Setenv("CICD_SSH_HOST", "")
+	// ssh 不是集群方法，目标未配置 deploy.ssh_host 且未配置 probe.url
+	// 时，无法推导探测地址，应跳过并提示在发布目标里填写主机（而非
+	// 旧版的「手动填写 URL」，现在优先从目标 ssh_host 推导）。
 	p := store.Project{Name: "demo", Deploy: store.DeploySpec{Method: "ssh"}, Probe: store.ProbeSpec{Enabled: true}}
 	urls, note := resolveURL(context.Background(), p, &config.Config{}, "")
 	if len(urls) != 0 {
-		t.Fatalf("ssh 无 URL 且无 CICD_SSH_HOST 时 resolveURL 应返回空地址，得到 %v", urls)
+		t.Fatalf("ssh 无 URL 且无 ssh_host 时 resolveURL 应返回空地址，得到 %v", urls)
 	}
-	if !strings.Contains(note, "CICD_SSH_HOST") {
-		t.Fatalf("resolveURL 说明应提示配置 CICD_SSH_HOST，得到 %q", note)
+	if !strings.Contains(note, "ssh_host") {
+		t.Fatalf("resolveURL 说明应提示配置 ssh_host，得到 %q", note)
 	}
 }
 
-func TestDeriveFromSSHUsesEnvHost(t *testing.T) {
-	// ssh 部署的探针 URL 应由 CICD_SSH_HOST + 默认端口 8080 推导，
-	// 无需在项目 JSON 里硬编码真实主机 IP。
-	t.Setenv("CICD_SSH_HOST", "203.0.113.10")
-	p := store.Project{Name: "demo", Deploy: store.DeploySpec{Method: "ssh"}, Probe: store.ProbeSpec{Enabled: true}}
+func TestDeriveFromSSHUsesTargetHost(t *testing.T) {
+	// ssh 部署的探针 URL 应由目标 deploy.ssh_host + 默认端口 8080 推导。
+	p := store.Project{Name: "demo", Deploy: store.DeploySpec{Method: "ssh", SSHHost: "203.0.113.10"}, Probe: store.ProbeSpec{Enabled: true}}
 	urls, note := resolveURL(context.Background(), p, &config.Config{}, "")
 	if len(urls) != 1 || urls[0] != "http://203.0.113.10:8080" {
 		t.Fatalf("ssh 应推导出 http://203.0.113.10:8080，得到 %v (note=%q)", urls, note)
@@ -185,9 +181,7 @@ func TestDeriveFromSSHUsesEnvHost(t *testing.T) {
 
 func TestDeriveFromSSHHonorsProbePort(t *testing.T) {
 	// 若设置了 ssh_probe_port（或 CICD_SSH_PROBE_PORT），推导出的 URL 应使用该端口。
-	t.Setenv("CICD_SSH_HOST", "203.0.113.10")
-	t.Setenv("CICD_SSH_PROBE_PORT", "9090")
-	p := store.Project{Name: "demo", Deploy: store.DeploySpec{Method: "ssh", SSHProbePort: "9090"}, Probe: store.ProbeSpec{Enabled: true}}
+	p := store.Project{Name: "demo", Deploy: store.DeploySpec{Method: "ssh", SSHHost: "203.0.113.10", SSHProbePort: "9090"}, Probe: store.ProbeSpec{Enabled: true}}
 	urls, _ := resolveURL(context.Background(), p, &config.Config{}, "")
 	if len(urls) != 1 || urls[0] != "http://203.0.113.10:9090" {
 		t.Fatalf("ssh 应推导出 http://203.0.113.10:9090，得到 %v", urls)
@@ -195,9 +189,8 @@ func TestDeriveFromSSHHonorsProbePort(t *testing.T) {
 }
 
 func TestResolveURLPerMethodOverrideFallback(t *testing.T) {
-	// ssh 方法下，若未配置 CICD_SSH_HOST（.env），且配置了 urls.ssh，
-	// 则回退到 urls.ssh 作为探测地址（.env 推导失败时的兜底）。
-	t.Setenv("CICD_SSH_HOST", "")
+	// ssh 方法下，若目标未配置 deploy.ssh_host 且配置了 urls.ssh，
+	// 则回退到 urls.ssh 作为探测地址（目标主机推导失败时的兜底）。
 	p := store.Project{
 		Name:   "demo",
 		Deploy: store.DeploySpec{Method: "ssh"},
@@ -205,28 +198,27 @@ func TestResolveURLPerMethodOverrideFallback(t *testing.T) {
 	}
 	urls, note := resolveURL(context.Background(), p, &config.Config{}, "")
 	if len(urls) != 1 || urls[0] != "http://1.2.3.4:8080" {
-		t.Fatalf("ssh 未配置 CICD_SSH_HOST 且配置了 urls.ssh 时应回退到该地址，得到 %v", urls)
+		t.Fatalf("ssh 未配置 ssh_host 且配置了 urls.ssh 时应回退到该地址，得到 %v", urls)
 	}
 	if note != "" {
 		t.Fatalf("命中兜底地址时不应有说明，得到 %q", note)
 	}
 }
 
-func TestResolveURLSSHEnvBeatsPerMethodOverride(t *testing.T) {
-	// 当同时配置了 CICD_SSH_HOST（.env）与 urls.ssh 时，应优先使用 .env 推导的
-	// 地址，避免在项目 JSON 里使用硬编码的真实主机 IP；urls.ssh 仅作兜底。
-	t.Setenv("CICD_SSH_HOST", "203.0.113.10")
+func TestResolveURLSSHTargetHostBeatsPerMethodOverride(t *testing.T) {
+	// 当目标 deploy.ssh_host 与 urls.ssh 同时存在时，应优先使用目标主机
+	// 推导的地址；urls.ssh 仅作兜底。
 	p := store.Project{
 		Name:   "demo",
-		Deploy: store.DeploySpec{Method: "ssh"},
+		Deploy: store.DeploySpec{Method: "ssh", SSHHost: "203.0.113.10"},
 		Probe:  store.ProbeSpec{Enabled: true, URLs: map[string]string{"ssh": "http://1.2.3.4:8080"}},
 	}
 	urls, note := resolveURL(context.Background(), p, &config.Config{}, "")
 	if len(urls) != 1 || urls[0] != "http://203.0.113.10:8080" {
-		t.Fatalf("ssh 应优先使用 CICD_SSH_HOST 推导的地址，得到 %v (note=%q)", urls, note)
+		t.Fatalf("ssh 应优先使用目标 ssh_host 推导的地址，得到 %v (note=%q)", urls, note)
 	}
 	if note != "" {
-		t.Fatalf("命中 .env 推导地址时不应有说明，得到 %q", note)
+		t.Fatalf("命中目标主机推导地址时不应有说明，得到 %q", note)
 	}
 }
 
@@ -242,8 +234,7 @@ func TestFirstNodeInternalIP(t *testing.T) {
 }
 
 func TestProbeUsesPerMethodURL(t *testing.T) {
-	// 未配置 CICD_SSH_HOST 时，ssh 方法应回退到 urls.ssh 覆盖并实际探测该地址。
-	t.Setenv("CICD_SSH_HOST", "")
+	// 目标未配置 ssh_host 时，ssh 方法应回退到 urls.ssh 覆盖并实际探测该地址。
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(200)
 		w.Write([]byte("ok"))

@@ -74,7 +74,7 @@ type DeploySpec struct {
 	SSHRunArgs   string `json:"ssh_run_args,omitempty"`
 	// SSHProbePort is the host port the deployed container listens on, used by
 	// the service probe to derive its target URL for ssh deploys (host comes
-	// from CICD_SSH_HOST / deploy.ssh_host, port from here / CICD_SSH_PROBE_PORT,
+	// from deploy.ssh_host, port from here / CICD_SSH_PROBE_PORT,
 	// default 8080). Keeping it here means the real host IP never has to be
 	// hardcoded in the project JSON — operators store it only in .env.
 	SSHProbePort  string `json:"ssh_probe_port,omitempty"`

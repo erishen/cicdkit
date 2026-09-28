@@ -132,8 +132,8 @@ export default function ProjectForm({ project, notes, onSaved, onCancel }) {
     if (targets.length > 0) return
     API.sshDefaults().then((d) => {
       if (!d) return
-      // 优先厂商级 IP（CICD_SSH_HOST_TENCENT），回落到旧的单一 CICD_SSH_HOST。
-      const host = (d.providers && d.providers.tencent) || d.host || ''
+      // 厂商级 IP（CICD_SSH_HOST_<PROVIDER>）仅作表单预填，主机以目标字段为准。
+      const host = (d.providers && d.providers.tencent) || ''
       if (!host) return
       setTargets((ts) => [...ts, {
         name: '腾讯云', method: 'ssh', cloud_provider: 'tencent',

@@ -182,14 +182,16 @@ func (p Project) ResolveDeploySpec(targetName, methodOverride string) (DeploySpe
 }
 
 // validateSSH checks the bare-host SSH deploy configuration. Host and user are
-// mandatory (either set on the project or supplied via CICD_SSH_* env vars, so
-// operators can keep connection secrets in a .env file); the port must be
+// mandatory (host must be set on the target itself — it is per-provider and is
+// pre-filled in the UI from CICD_SSH_HOST_<PROVIDER>; user and other shared
+// connection fields may still come from CICD_SSH_* env vars, so operators can
+// keep connection secrets in a .env file); the port must be
 // numeric when set; and every value that ends up interpolated into a remote
 // `docker` command is confined to shell-safe tokens (no |;&$`>< or newlines) so
 // a project config cannot smuggle shell metacharacters onto the remote host.
 func validateSSH(spec DeploySpec) error {
 	// Effective values: project field wins, otherwise the matching env var.
-	host := sshEnvOr(spec.SSHHost, "CICD_SSH_HOST", "")
+	host := strings.TrimSpace(spec.SSHHost)
 	user := sshEnvOr(spec.SSHUser, "CICD_SSH_USER", "")
 	port := sshEnvOr(spec.SSHPort, "CICD_SSH_PORT", "")
 	container := sshEnvOr(spec.SSHContainer, "CICD_SSH_CONTAINER", "")
@@ -198,7 +200,7 @@ func validateSSH(spec DeploySpec) error {
 	image := strings.TrimSpace(spec.SSHImage)
 
 	if host == "" {
-		return fmt.Errorf("ssh 部署缺少 deploy.ssh_host（或环境变量 CICD_SSH_HOST）")
+		return fmt.Errorf("ssh 部署缺少 deploy.ssh_host")
 	}
 	if user == "" {
 		return fmt.Errorf("ssh 部署缺少 deploy.ssh_user（或环境变量 CICD_SSH_USER）")
@@ -220,7 +222,7 @@ func validateSSH(spec DeploySpec) error {
 	// time (defense in depth), but the config must never carry these chars.
 	const shellMetachars = "|;&$`><\"'(){}\n\\"
 	for field, val := range map[string]string{
-		"deploy.ssh_host / CICD_SSH_HOST":          host,
+		"deploy.ssh_host":                          host,
 		"deploy.ssh_user / CICD_SSH_USER":          user,
 		"deploy.ssh_container / CICD_SSH_CONTAINER": container,
 		"deploy.ssh_key_path / CICD_SSH_KEY_PATH":    keyPath,
@@ -251,7 +253,8 @@ func sshEnvOr(v, envKey, def string) string {
 	return def
 }
 
-// ResolveSSHSpec fills any empty SSH connection fields from CICD_SSH_* environment
+// ResolveSSHSpec fills any empty SSH connection fields (except the host, which
+// is per-target and must be set on the spec itself) from CICD_SSH_* environment
 // variables, so connection secrets can live in a .env file instead of the stored
 // project / UI form. It is the single source of truth shared by the deploy stage
 // and the service probe (which derives the bare-host probe URL from the resolved
@@ -259,7 +262,7 @@ func sshEnvOr(v, envKey, def string) string {
 // — no commands are executed, so it is safe to call from validation, deploy, and
 // the probe alike.
 func ResolveSSHSpec(spec DeploySpec) DeploySpec {
-	spec.SSHHost = sshEnvOr(spec.SSHHost, "CICD_SSH_HOST", "")
+	spec.SSHHost = strings.TrimSpace(spec.SSHHost)
 	spec.SSHUser = sshEnvOr(spec.SSHUser, "CICD_SSH_USER", "")
 	spec.SSHPort = sshEnvOr(spec.SSHPort, "CICD_SSH_PORT", "")
 	spec.SSHKeyPath = sshEnvOr(spec.SSHKeyPath, "CICD_SSH_KEY_PATH", "")

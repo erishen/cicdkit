@@ -3,9 +3,9 @@
 // runs automatically after a successful deploy and on demand via the API.
 //
 // The target URL is resolved per deploy method. For ssh deploys the probe URL
-// is derived first from the resolved connection — the host comes from CICD_SSH_HOST
-// (.env) or deploy.ssh_host and the port from the probe port config — so the real
-// host IP never appears in the project JSON. Only if no .env host is configured
+// is derived first from the resolved connection — the host comes from
+// deploy.ssh_host (pre-filled in the UI from CICD_SSH_HOST_<PROVIDER> in .env)
+// and the port from the probe port config. Only if the target has no host
 // does it fall back to ProbeSpec.URLs[<method>] (per-target override) or
 // ProbeSpec.URL (global manual URL). For cluster methods the URL is auto-derived
 // from the Kubernetes Service backing the deployment (NodePort → the node's
@@ -200,10 +200,10 @@ func parseResponse(method, url string, spec store.ProbeSpec, resp *http.Response
 
 // resolveURL returns candidate probe targets. Resolution precedence:
 //  1. for ssh deploys, auto-derivation from the resolved connection
-//     (CICD_SSH_HOST env / deploy.ssh_host + probe port) — the real host IP
-//     lives only in .env, never in the project JSON;
-//  2. a per-method override URLs[<deploy method>] (fallback for ssh if no
-//     .env host is configured, or for other methods);
+//     (deploy.ssh_host + probe port) — the host lives on the target
+//     (pre-filled in the UI from CICD_SSH_HOST_<PROVIDER> in .env);
+//  2. a per-method override URLs[<deploy method>] (fallback for ssh if the
+//     target has no ssh_host, or for other methods);
 //  3. a global manual URL;
 //  4. auto-derivation from the deployed Kubernetes Service (cluster methods),
 //     which may yield several candidate hosts (see deriveFromService).
@@ -213,9 +213,9 @@ func parseResponse(method, url string, spec store.ProbeSpec, resp *http.Response
 func resolveURL(ctx context.Context, p store.Project, cfg *config.Config, targetName string) ([]string, string) {
 	method := p.Deploy.Method
 	if method == "ssh" {
-		// ssh 部署没有集群 Service，但连接信息（含主机）来自 .env 的
-		// CICD_SSH_*，所以探针 URL 优先由解析后的 ssh host + 探针端口推导，
-		// 真实主机 IP 不进项目 JSON。仅当 .env 也未配置时才回退到 JSON。
+		// ssh 部署没有集群 Service，主机来自目标自身的 deploy.ssh_host
+		// （表单会从 .env 的 CICD_SSH_HOST_<厂商> 预填），所以探针 URL
+		// 优先由 ssh host + 探针端口推导。目标没配主机时才回退到 URL 覆盖。
 		if urls, _ := deriveFromSSH(p); len(urls) > 0 {
 			return urls, ""
 		}
@@ -235,7 +235,7 @@ func resolveURL(ctx context.Context, p store.Project, cfg *config.Config, target
 		return []string{u}, ""
 	}
 	if method == "ssh" {
-		return nil, "ssh 部署未配置 ssh_host（也没设置 CICD_SSH_HOST 环境变量），无法推导探测地址；请在 .env 配置 CICD_SSH_HOST，或在 probe.urls.ssh 中手动指定地址"
+		return nil, "ssh 部署未配置 deploy.ssh_host，无法推导探测地址；请在发布目标里填写主机（.env 的 CICD_SSH_HOST_<厂商> 会在表单预填），或在 probe.urls.ssh 中手动指定地址"
 	}
 	if !needsCluster(method) {
 		return nil, "未配置 probe.url 且部署方式不涉及集群，无法自动推导服务地址（请手动填写 URL，或在 probe.urls 中按部署方式指定）"
@@ -244,15 +244,15 @@ func resolveURL(ctx context.Context, p store.Project, cfg *config.Config, target
 }
 
 // deriveFromSSH builds the bare-host probe URL for an ssh deploy from the
-// resolved connection (host via CICD_SSH_HOST env or deploy.ssh_host) plus the
-// probe port (deploy.ssh_probe_port / CICD_SSH_PROBE_PORT, default 8080). This
-// keeps the real host IP out of the project JSON: operators store it only in the
-// .env file, and the probe derives its target at run time.
+// resolved connection (deploy.ssh_host on the target) plus the
+// probe port (deploy.ssh_probe_port / CICD_SSH_PROBE_PORT, default 8080). The
+// host itself is pre-filled in the target form from CICD_SSH_HOST_<PROVIDER>
+// in .env, so operators rarely type it by hand.
 func deriveFromSSH(p store.Project) ([]string, string) {
 	spec := store.ResolveSSHSpec(p.Deploy)
 	host := strings.TrimSpace(spec.SSHHost)
 	if host == "" {
-		return nil, "ssh 部署未配置 ssh_host（也没设置 CICD_SSH_HOST 环境变量），无法推导探测地址；请在 .env 配置 CICD_SSH_HOST，或在 probe.urls.ssh 中手动指定地址"
+		return nil, "ssh 部署未配置 deploy.ssh_host，无法推导探测地址；请在发布目标里填写主机（.env 的 CICD_SSH_HOST_<厂商> 会在表单预填），或在 probe.urls.ssh 中手动指定地址"
 	}
 	port := strings.TrimSpace(spec.SSHProbePort)
 	if port == "" {

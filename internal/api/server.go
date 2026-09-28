@@ -170,8 +170,9 @@ func (s *Server) handleConfigSSHDefaults(w http.ResponseWriter, r *http.Request)
 	}
 	// Per-provider hosts from .env: CICD_SSH_HOST_<PROVIDER> (e.g. ..._TENCENT,
 	// ..._ALIBABA). ALIYUN is accepted as an alias for ALIBABA since that is how
-	// the vendor is commonly written. The legacy single CICD_SSH_HOST stays
-	// untouched (probe URL derivation + the "腾讯云" preset keep working).
+	// the vendor is commonly written. These only pre-fill the target form —
+	// the backend never reads a generic CICD_SSH_HOST (the host lives on the
+	// deploy target itself).
 	provHost := func(p string) string {
 		if v := envOr("CICD_SSH_HOST_"+strings.ToUpper(p), ""); v != "" {
 			return v
@@ -188,7 +189,6 @@ func (s *Server) handleConfigSSHDefaults(w http.ResponseWriter, r *http.Request)
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"host":            envOr("CICD_SSH_HOST", ""),
 		"user":            envOr("CICD_SSH_USER", ""),
 		"port":            envOr("CICD_SSH_PORT", ""),
 		"key_path":        envOr("CICD_SSH_KEY_PATH", ""),
