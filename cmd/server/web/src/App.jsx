@@ -25,7 +25,7 @@ const METHOD_LABEL = {
 }
 // UI 构建戳：每次前端改动后人工升一位，用于一眼确认浏览器看到的是否为最新版。
 // 后端戳走 /api/version，由后端 BuildStamp 提供。
-const UI_BUILD = '2026-09-21 21:55'
+const UI_BUILD = '2026-09-29 09:10'
 
 // 哨兵是否在视口内（含顶部/底部越界判断），用于首屏/视口未填满时持续追加。
 function inViewport(el) {
@@ -323,23 +323,47 @@ export default function App() {
                   {p.deploy?.method && <span className="tag">{p.deploy.method}</span>}
                   {p.build?.push && <span className="tag">push</span>}
                 </div>
-                {p.last_deploy && (
-                  <div className="last-deploy">
-                    <span className="muted">最近部署</span>
-                    <span className="tag tag-accent">{METHOD_LABEL[p.last_deploy.method] || p.last_deploy.method}</span>
-                    {p.last_deploy.target && <span className="tag tag-accent" style={{ background: 'var(--accent-2, #0ea5e9)', color: '#fff' }}>{p.last_deploy.target}</span>}
-                    <span>{new Date(p.last_deploy.at).toLocaleString('zh-CN')}</span>
-                    {p.last_deploy.probe_status === 'ok' && <span className="badge badge-ok">探针通过</span>}
-                    {(p.last_deploy.probe_status === 'fail' || p.last_deploy.probe_status === 'err') && <span className="badge badge-err">探针失败</span>}
-                    {p.last_deploy.probe_status === 'skip' && <span className="badge badge-queue">探针跳过</span>}
-                  </div>
-                )}
-                {p.last_deploy && p.last_deploy.probe_status === 'ok' && p.last_deploy.probe_url && (
-                  <div className="last-deploy">
-                    <span className="muted">访问</span>
-                    <a className="deploy-link" href={p.last_deploy.probe_url} target="_blank" rel="noreferrer">{p.last_deploy.probe_url}</a>
-                  </div>
-                )}
+                {(() => {
+                  // 每个发布目标（命名目标 + 主方法）单独展示最新一次成功部署，
+                  // 而不是只显示全局最后一次（旧逻辑会互相覆盖）。
+                  const buckets = p.last_deploys || {}
+                  const rows = []
+                  const mainMethod = p.deploy && p.deploy.method
+                  if (mainMethod && buckets[mainMethod]) {
+                    rows.push({ key: mainMethod, label: METHOD_LABEL[mainMethod] || mainMethod, sub: '主', info: buckets[mainMethod] })
+                  }
+                  ;(p.targets || []).forEach((t) => {
+                    if (buckets[t.name]) {
+                      rows.push({ key: t.name, label: t.name, sub: '目标', info: buckets[t.name] })
+                    }
+                  })
+                  if (rows.length === 0 && p.last_deploy) {
+                    rows.push({ key: '_single', label: METHOD_LABEL[p.last_deploy.method] || p.last_deploy.method, sub: p.last_deploy.target || '', info: p.last_deploy })
+                  }
+                  if (rows.length === 0) return null
+                  const probeBadge = (st) => {
+                    if (st === 'ok') return <span className="badge badge-ok">探针通过</span>
+                    if (st === 'fail' || st === 'err') return <span className="badge badge-err">探针失败</span>
+                    if (st === 'skip') return <span className="badge badge-queue">探针跳过</span>
+                    return <span className="badge badge-queue">未探测</span>
+                  }
+                  return (
+                    <div className="last-deploy-grid">
+                      <div className="muted" style={{ fontSize: 12 }}>部署状态（{rows.length}）</div>
+                      {rows.map((r) => (
+                        <div className="last-deploy" key={r.key}>
+                          <span className="tag tag-accent">{r.label}</span>
+                          {r.sub && <span className="tag tag-accent" style={{ background: 'var(--accent-2, #0ea5e9)', color: '#fff' }}>{r.sub}</span>}
+                          <span>{new Date(r.info.at).toLocaleString('zh-CN')}</span>
+                          {probeBadge(r.info.probe_status)}
+                          {r.info.probe_status === 'ok' && r.info.probe_url && (
+                            <a className="deploy-link" href={r.info.probe_url} target="_blank" rel="noreferrer">{r.info.probe_url}</a>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )
+                })()}
                 <div className="row">
                   <button className="btn btn-sm" disabled={isTriggerBlocked(p.id)} onClick={() => triggerAction(p.id, 'build')}>{isTriggerBlocked(p.id) ? '触发中…' : 'Build'}</button>
                   <div style={{ position: 'relative', display: 'inline-block' }}>

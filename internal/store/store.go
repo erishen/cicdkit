@@ -122,21 +122,35 @@ func (s *jsonStore) load() error {
 	return nil
 }
 
-// backfillLastDeploy derives each project's LastDeploy from its newest
-// successful deployment in memory. This makes prior rollouts (including ssh/腾讯云
-// overrides) visible on the project card immediately on startup, without waiting
-// for a fresh deploy. It only mutates the in-memory slice; persistence happens
-// on the next mutation (e.g. a new deployment), so a stale store.json is never
-// needlessly rewritten at load time.
+// backfillLastDeploy derives each project's LastDeploy (most recent rollout)
+// and LastDeploys (per-destination buckets) from successful deployments in
+// memory. This makes prior rollouts — including ssh/腾讯云 / ssh/阿里云 overrides
+// and the main local-k3s method — visible on the project card immediately on
+// startup, without waiting for a fresh deploy. It only mutates the in-memory
+// slice; persistence happens on the next mutation (e.g. a new deployment), so a
+// stale store.json is never needlessly rewritten at load time.
 func (s *jsonStore) backfillLastDeploy() {
+	// newest[projectID] = most recent successful deployment (for LastDeploy).
 	newest := make(map[string]Deployment)
+	// perDest[projectID][key] = most recent successful deployment for that
+	// destination (keyed by target name, or method when published to main).
+	perDest := make(map[string]map[string]Deployment)
 	for _, d := range s.deployments {
 		if d.Status != "deployed" {
 			continue
 		}
-		cur, ok := newest[d.ProjectID]
-		if !ok || d.CreatedAt.After(cur.CreatedAt) {
+		if cur, ok := newest[d.ProjectID]; !ok || d.CreatedAt.After(cur.CreatedAt) {
 			newest[d.ProjectID] = d
+		}
+		key := d.Target
+		if key == "" {
+			key = d.Method
+		}
+		if perDest[d.ProjectID] == nil {
+			perDest[d.ProjectID] = make(map[string]Deployment)
+		}
+		if cur, ok := perDest[d.ProjectID][key]; !ok || d.CreatedAt.After(cur.CreatedAt) {
+			perDest[d.ProjectID][key] = d
 		}
 	}
 	for i := range s.projects {
@@ -148,6 +162,21 @@ func (s *jsonStore) backfillLastDeploy() {
 				At:          d.CreatedAt,
 				ProbeStatus: d.Probe.Status,
 				ProbeURL:    d.Probe.URL,
+			}
+		}
+		if buckets, ok := perDest[s.projects[i].ID]; ok {
+			if s.projects[i].LastDeploys == nil {
+				s.projects[i].LastDeploys = make(map[string]*LastDeployInfo)
+			}
+			for key, d := range buckets {
+				s.projects[i].LastDeploys[key] = &LastDeployInfo{
+					Method:      d.Method,
+					Target:      d.Target,
+					ImageRef:    d.ImageRef,
+					At:          d.CreatedAt,
+					ProbeStatus: d.Probe.Status,
+					ProbeURL:    d.Probe.URL,
+				}
 			}
 		}
 	}
@@ -611,7 +640,7 @@ func (s *jsonStore) SaveDeployment(d Deployment) error {
 	if d.Status == "deployed" {
 		for i := range s.projects {
 			if s.projects[i].ID == d.ProjectID {
-				s.projects[i].LastDeploy = &LastDeployInfo{
+				info := &LastDeployInfo{
 					Method:      d.Method,
 					Target:      d.Target,
 					ImageRef:    d.ImageRef,
@@ -619,6 +648,17 @@ func (s *jsonStore) SaveDeployment(d Deployment) error {
 					ProbeStatus: d.Probe.Status,
 					ProbeURL:    d.Probe.URL,
 				}
+				s.projects[i].LastDeploy = info
+				// Per-destination bucket: key by target name when published to a
+				// named target, otherwise by the deploy method (e.g. "local-k3s").
+				key := d.Target
+				if key == "" {
+					key = d.Method
+				}
+				if s.projects[i].LastDeploys == nil {
+					s.projects[i].LastDeploys = make(map[string]*LastDeployInfo)
+				}
+				s.projects[i].LastDeploys[key] = info
 				break
 			}
 		}
@@ -643,6 +683,7 @@ func (s *jsonStore) ClearDeployments() error {
 	// whose history was just wiped.
 	for i := range s.projects {
 		s.projects[i].LastDeploy = nil
+		s.projects[i].LastDeploys = nil
 	}
 	s.persist()
 	return nil

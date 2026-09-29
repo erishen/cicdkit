@@ -166,6 +166,12 @@ type Project struct {
 	// Deploy.Method, which is only the project's configured default target. A
 	// per-run override (e.g. publishing to ssh/腾讯云 once) still surfaces here.
 	LastDeploy *LastDeployInfo `json:"last_deploy,omitempty"`
+	// LastDeploys keeps the latest successful rollout *per publish destination*
+	// (named DeployTarget by its name, or the main Deploy.Method when published
+	// straight to it), so the project card can show the status of every target
+	// at once instead of only the single most-recent one. Keyed by target name
+	// (e.g. "腾讯云") or by method ("local-k3s") when no target name applies.
+	LastDeploys map[string]*LastDeployInfo `json:"last_deploys,omitempty"`
 }
 
 // LastDeployInfo is a compact snapshot of the latest successful deployment,
