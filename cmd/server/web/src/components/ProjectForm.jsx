@@ -77,6 +77,7 @@ export default function ProjectForm({ project, notes, onSaved, onCancel }) {
     if (!project || !project.targets) return []
     return project.targets.map((t) => ({
       name: t.name || '',
+      note: t.note || '',
       method: t.method || 'ssh',
       ssh_host: t.ssh_host || '', ssh_user: t.ssh_user || '', ssh_port: t.ssh_port || '',
       ssh_key_path: t.ssh_key_path || '', ssh_image: t.ssh_image || '', ssh_container: t.ssh_container || '',
@@ -115,7 +116,7 @@ export default function ProjectForm({ project, notes, onSaved, onCancel }) {
     setTargets((ts) => ts.map((t, j) => (j === i ? { ...t, [k]: v } : t)))
   }
   const addTarget = () => setTargets((ts) => [...ts, {
-    name: '', method: 'ssh', cloud_provider: 'custom',
+    name: '', note: '', method: 'ssh', cloud_provider: 'custom',
     ssh_host: '', ssh_user: '', ssh_port: '', ssh_key_path: '', ssh_image: '',
     ssh_container: '', ssh_run_args: '', ssh_probe_port: '', ssh_container_port: '', ssh_pull: false, ssh_transfer: false,
     kubeconfig: '', namespace: '', manifest_path: '', deployment: '', container: '',
@@ -136,7 +137,7 @@ export default function ProjectForm({ project, notes, onSaved, onCancel }) {
       const host = (d.providers && d.providers.tencent) || ''
       if (!host) return
       setTargets((ts) => [...ts, {
-        name: '腾讯云', method: 'ssh', cloud_provider: 'tencent',
+        name: '腾讯云', note: '', method: 'ssh', cloud_provider: 'tencent',
         ssh_host: host, ssh_user: d.user || '', ssh_port: d.port || '',
         ssh_key_path: d.key_path || '',
         ssh_image: '', ssh_container: '', ssh_run_args: '', ssh_probe_port: '', ssh_container_port: '',
@@ -210,6 +211,7 @@ export default function ProjectForm({ project, notes, onSaved, onCancel }) {
         .filter((t) => t.name.trim())
         .map((t) => ({
           name: t.name.trim(),
+          note: t.note.trim(),
           method: t.method,
           kubeconfig: t.kubeconfig.trim(),
           namespace: t.namespace.trim(),
@@ -536,6 +538,7 @@ export default function ProjectForm({ project, notes, onSaved, onCancel }) {
                       <label>探针端口（宿主发布端口）<input className="input" placeholder="8080" value={t.ssh_probe_port} onChange={updateTarget(i, 'ssh_probe_port')} /></label>
                       <label>容器内端口（与 EXPOSE/服务监听对齐，默认 8080）<input className="input" placeholder="8080" value={t.ssh_container_port} onChange={updateTarget(i, 'ssh_container_port')} /></label>
                       <label className="checkbox"><input type="checkbox" checked={t.ssh_pull} onChange={updateTarget(i, 'ssh_pull')} /> 部署前 docker pull</label>
+                      <label>备注（仅展示，卡片对应目标行可见）<input className="input" placeholder="如 公网域名 lume-crm.erishen.cn" value={t.note} onChange={updateTarget(i, 'note')} /></label>
                     </React.Fragment>
                   )}
                   {t.method !== 'ssh' && (

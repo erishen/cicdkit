@@ -25,7 +25,7 @@ const METHOD_LABEL = {
 }
 // UI 构建戳：每次前端改动后人工升一位，用于一眼确认浏览器看到的是否为最新版。
 // 后端戳走 /api/version，由后端 BuildStamp 提供。
-const UI_BUILD = '2026-09-29 09:10'
+const UI_BUILD = '2026-09-29 09:20'
 
 // 哨兵是否在视口内（含顶部/底部越界判断），用于首屏/视口未填满时持续追加。
 function inViewport(el) {
@@ -334,7 +334,7 @@ export default function App() {
                   }
                   ;(p.targets || []).forEach((t) => {
                     if (buckets[t.name]) {
-                      rows.push({ key: t.name, label: t.name, sub: '目标', info: buckets[t.name] })
+                      rows.push({ key: t.name, label: t.name, sub: '目标', info: buckets[t.name], note: t.note })
                     }
                   })
                   if (rows.length === 0 && p.last_deploy) {
@@ -346,6 +346,14 @@ export default function App() {
                     if (st === 'fail' || st === 'err') return <span className="badge badge-err">探针失败</span>
                     if (st === 'skip') return <span className="badge badge-queue">探针跳过</span>
                     return <span className="badge badge-queue">未探测</span>
+                  }
+                  // 备注里的域名/URL 自动链接化，其余文字原样展示（如「公网域名 lume-crm.erishen.cn」）。
+                  const renderNote = (note) => {
+                    const m = note.match(/(https?:\/\/[^\s]+)|([a-zA-Z0-9-]+(\.[a-zA-Z0-9-]+)+)/)
+                    if (!m) return note
+                    const tok = m[0]
+                    const url = tok.startsWith('http') ? tok : 'https://' + tok
+                    return <>{note.slice(0, m.index)}<a className="deploy-link" href={url} target="_blank" rel="noreferrer">{tok}</a>{note.slice(m.index + tok.length)}</>
                   }
                   return (
                     <div className="last-deploy-grid">
@@ -359,6 +367,7 @@ export default function App() {
                           {r.info.probe_status === 'ok' && r.info.probe_url && (
                             <a className="deploy-link" href={r.info.probe_url} target="_blank" rel="noreferrer">{r.info.probe_url}</a>
                           )}
+                          {r.note && <span className="deploy-note">{renderNote(r.note)}</span>}
                         </div>
                       ))}
                     </div>

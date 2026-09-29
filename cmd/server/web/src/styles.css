@@ -112,6 +112,7 @@ textarea.input { resize: vertical; font-family: ui-monospace, monospace; }
 /* 部署后可点击的「访问地址」链接：项目卡片与部署历史共用，跳转到探针发现的可达服务 URL */
 .deploy-link { color: var(--accent, #2f6fed); text-decoration: none; border-bottom: 1px solid currentColor; word-break: break-all; }
 .deploy-link:hover { text-decoration: none; opacity: .82; }
+.deploy-note { flex-basis: 100%; font-size: 11px; color: var(--muted); margin-top: 1px; }
 
 /* 列表序号（数据编号） + 总数标签 */
 .seq {

@@ -142,6 +142,10 @@ type ProbeSpec struct {
 // override flow).
 type DeployTarget struct {
 	Name string `json:"name"`
+	// Note is a free-form remark shown on the project card next to this
+	// target's deploy-status row (e.g. "公网域名 lume-crm.erishen.cn"). It is
+	// display-only metadata and never used by the deploy/probe pipeline.
+	Note string `json:"note,omitempty"`
 	DeploySpec
 }
 
