@@ -122,6 +122,9 @@ const API = {
   clearDeployments: () => request('/api/deployments', { method: 'DELETE' }),
   validate: (id) => request('/api/projects/' + id + '/validate', { method: 'POST', ...jsonBody({}) }),
   probe: (id) => request('/api/projects/' + id + '/probe', { method: 'POST', ...jsonBody({}) }),
+  // 访客统计:代理线上 /api/visits(owner-only,PIN 校验)。未配置的项目返回
+  // { configured:false },前端据此不展示。
+  visits: (id) => request('/api/projects/' + id + '/visits'),
   // 生成缺失文件：GET 预览（不落盘），POST 写入 build.context 并更新项目配置。
   generatePlan: (id) => request('/api/projects/' + id + '/generate', { method: 'GET' }),
   generateApply: (id) => request('/api/projects/' + id + '/generate', { method: 'POST', ...jsonBody({}) }),

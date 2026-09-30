@@ -25,7 +25,7 @@ const METHOD_LABEL = {
 }
 // UI 构建戳：每次前端改动后人工升一位，用于一眼确认浏览器看到的是否为最新版。
 // 后端戳走 /api/version，由后端 BuildStamp 提供。
-const UI_BUILD = '2026-09-29 09:20'
+const UI_BUILD = '2026-09-30 20:05'
 
 // 哨兵是否在视口内（含顶部/底部越界判断），用于首屏/视口未填满时持续追加。
 function inViewport(el) {
@@ -75,6 +75,51 @@ function useInfiniteSentinel(loadMore, hasMore, onBusy) {
   }, [hasMore, tryLoad])
 
   return ref
+}
+
+// 访客统计区块:仅当项目配置了 PIN + 公网域名时显示(后端 visits 返回
+// configured:true)。数据来自线上埋点,owner-only;拉取失败/未配置静默隐藏。
+function VisitsBlock({ project }) {
+  const [v, setV] = useState(null)
+  useEffect(() => {
+    let on = true
+    API.visits(project.id).then((d) => { if (on && d && d.configured) setV(d) }).catch(() => {})
+    return () => { on = false }
+  }, [project.id])
+  if (!v) return null
+  const days = (v.days || []).slice(0, 7).reverse()
+  return (
+    <div className="visits">
+      <div className="visits-head">访客统计</div>
+      <div className="visits-grid">
+        <span className="visits-num"><b>{v.total ?? 0}</b>总访问</span>
+        <span className="visits-num"><b>{v.today ?? 0}</b>今日</span>
+        <span className="visits-num"><b>{v.uv ?? 0}</b>独立访客</span>
+      </div>
+      {days.length > 0 && (
+        <div className="visits-days">
+          {days.map((d) => (
+            <span className="visits-day" key={d.d} title={`${d.d} PV ${d.pv} UV ${d.uv}`}>{d.d.slice(5)}·{d.pv}</span>
+          ))}
+        </div>
+      )}
+      {(v.recent || []).length > 0 && (
+        <div className="visits-recent">
+          <div className="visits-recent-head">最近访客（仅本机可见）</div>
+          <ul>
+            {(v.recent || []).map((r, i) => (
+              <li key={i} title={r.ua || ''}>
+                <span className="visits-ip">{r.ip || '?'}</span>
+                <span className="visits-path">{r.path || ''}</span>
+                {r.referrer && <span className="visits-ref">{r.referrer}</span>}
+                <span className="visits-time">{r.t ? r.t.slice(11, 16) : ''}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  )
 }
 
 export default function App() {
@@ -323,6 +368,7 @@ export default function App() {
                   {p.deploy?.method && <span className="tag">{p.deploy.method}</span>}
                   {p.build?.push && <span className="tag">push</span>}
                 </div>
+                <VisitsBlock project={p} />
                 {(() => {
                   // 每个发布目标（命名目标 + 主方法）单独展示最新一次成功部署，
                   // 而不是只显示全局最后一次（旧逻辑会互相覆盖）。

@@ -183,6 +183,13 @@ func (s *Server) handleProjectByID(w http.ResponseWriter, r *http.Request) {
 		}
 		writeError(w, http.StatusMethodNotAllowed, "不支持的方法")
 		return
+	case "visits":
+		if r.Method == http.MethodGet {
+			s.handleProjectVisits(w, r, id)
+			return
+		}
+		writeError(w, http.StatusMethodNotAllowed, "不支持的方法")
+		return
 	case "probe":
 		if r.Method == http.MethodPost || r.Method == http.MethodGet {
 			s.handleProbeProject(w, r, id)
@@ -321,6 +328,70 @@ func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request, id string
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"deleted": id})
+}
+
+// ---- 访客统计 ----
+
+// visitsPinRe / visitsDomainRe:从部署配置推导访客统计的 PIN 与线上域名——
+// PIN 取任一 ssh_run_args 里的 LUME_CRM_VISIT_PIN=xxx,域名取 target note 的
+// "公网域名 xxx"。两者齐备才代理线上 /api/visits(owner-only,带 PIN 校验),
+// 否则返回 configured=false,前端不展示。
+var (
+	visitsPinRe    = regexp.MustCompile(`LUME_CRM_VISIT_PIN=([A-Za-z0-9]+)`)
+	visitsDomainRe = regexp.MustCompile(`公网域名\s+(\S+)`)
+)
+
+// handleProjectVisits 代理线上访客统计。响应透传线上接口的 JSON,
+// 额外加 configured 标记(是否已配置访客统计)。
+// recent 明细(含访客 IP/UA/来源)透传给平台页:cicdkit 仅监听 127.0.0.1,
+// 平台页只对 owner 本机可见,不透传到任何公网面。线上 lume-crm 的公网
+// /api/visits 仍由 PIN 门禁保护,本代理的 PIN 从项目配置运行时推导。
+func (s *Server) handleProjectVisits(w http.ResponseWriter, r *http.Request, id string) {
+	p, ok := s.store.GetProject(id)
+	if !ok {
+		writeError(w, http.StatusNotFound, "项目不存在")
+		return
+	}
+	url, pin := visitsEndpoint(p)
+	if url == "" || pin == "" {
+		writeJSON(w, http.StatusOK, map[string]any{"configured": false})
+		return
+	}
+	client := &http.Client{Timeout: 8 * time.Second}
+	resp, err := client.Get(url + "/api/visits?pin=" + pin)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "访客统计接口不可达: "+err.Error())
+		return
+	}
+	defer resp.Body.Close()
+	var out map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		writeError(w, http.StatusBadGateway, "访客统计响应解析失败: "+err.Error())
+		return
+	}
+	out["configured"] = true
+	writeJSON(w, http.StatusOK, out)
+}
+
+// visitsEndpoint 从项目部署目标推导线上访客统计 URL 与 PIN。
+func visitsEndpoint(p store.Project) (url, pin string) {
+	for _, t := range p.Targets {
+		if m := visitsDomainRe.FindStringSubmatch(t.Note); len(m) > 1 && url == "" {
+			url = "https://" + m[1]
+		}
+	}
+	specs := make([]store.DeploySpec, 0, len(p.Targets)+1)
+	specs = append(specs, p.Deploy)
+	for _, t := range p.Targets {
+		specs = append(specs, t.DeploySpec)
+	}
+	for _, d := range specs {
+		if m := visitsPinRe.FindStringSubmatch(d.SSHRunArgs); len(m) > 1 {
+			pin = m[1]
+			break
+		}
+	}
+	return url, pin
 }
 
 // ---- Triggers ----
