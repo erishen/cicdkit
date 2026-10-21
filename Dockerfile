@@ -1,6 +1,6 @@
 # 多阶段构建：前端(Vite) -> golang 编译(嵌入 dist) -> 轻量运行时镜像
 # 运行时包含 docker CLI 与 kubectl，用于构建镜像并向 k3s 发布。
-FROM node:20-alpine AS web
+FROM node:24-alpine AS web
 WORKDIR /web
 COPY cmd/server/web/package.json ./
 RUN npm install --registry=https://registry.npmmirror.com || npm install
