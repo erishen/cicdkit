@@ -94,3 +94,23 @@
 > 注：通过 webhook 让平台从"本地一键发布器"升级为"push 即构建"的 CI，最关键的两条是
 > ① 加一个接收端点并校验签名；② 让 build 阶段支持 `git clone` 而非只 build 本地路径；
 > ③ 解决"GitHub 如何打到本机"的网络可达性（域名 + 公网 IP）。
+
+---
+
+## 六、安全跟进 — hello-php 示例镜像
+
+Status: fixed (2026-10-22).
+
+`examples/hello-php/Dockerfile:5` 原先使用 `php:8.3.8-cli-alpine`，
+低于 php2shell（CVE-2026-109618 / CVE-2026-109619）的修复版本
+`8.3.36`。该示例用 PHP 内置服务器直接对外提供页面；如果被构建并
+暴露到公网，会受影响。仅作本地示例时优先级低，但仍应修正，避免
+被复制到真实项目。
+
+- [x] 基础镜像升级为 `php:8.3.36-cli-alpine`；同步更新
+      `index.php`、`project.json`、`composer.json`、`ARCHITECTURE.md`
+      与 `examples/README.md` 中的版本/端口说明。
+- [x] 重建示例并确认容器内 `php -v` 为 `PHP 8.3.36`；冒烟测试
+      `GET /` 返回 200，响应头 `X-Powered-By: PHP/8.3.36`。
+- [x] 如果该示例不再维护，明确标记为“仅本地演示、禁止公网部署”，
+      或从默认示例清单中移除（当前仍在维护，暂不处理）。

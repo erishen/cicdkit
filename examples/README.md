@@ -192,11 +192,11 @@ curl -X POST http://localhost:8080/api/projects -H 'Content-Type: application/js
 |------|------|----------|------------|------|
 | hello-rust | Rust 1.85 | 多阶段（rust:slim 编译 → debian 运行） | 8080 | 零依赖，仅标准库 `std::net` |
 | hello-ruby | Ruby 3.3 | 单阶段（ruby:alpine） | 8080 | 零依赖，仅标准库 `socket` |
-| hello-php | PHP 8.3 | 单阶段（php:*-apache） | 80 | Apache 自动服务 `index.php` |
+| hello-php | PHP 8.3 | 单阶段（php:8.3.36-cli-alpine） | 8080 | PHP 内置服务器 `php -S` 服务 `index.php` |
 | hello-dotnet | .NET 8 | 多阶段（SDK 编译 → runtime 运行） | 8080 | 零依赖 `HttpListener`，无 ASP.NET Core |
 | hello-python | Python 3.12 | 单阶段（python:slim） | 8080 | 零依赖，仅标准库 `http.server` |
 
-> 注意 PHP 容器内 Apache 监听 80，故其 `k8s/deployment.yaml` 的 `targetPort` 与 `ssh_run_args` 都是 `8080:80`（其它语言为 `8080:8080`）。
+> 注意 PHP 容器内使用内置服务器监听 8080，`targetPort` 与 `ssh_run_args` 均为 `8080:8080`（与其它语言一致）。
 
 导入（任选其一，其余路径同理）：
 

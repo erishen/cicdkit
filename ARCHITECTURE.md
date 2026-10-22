@@ -258,7 +258,7 @@ UI 点击「发布」
 | hello-java | Java | `eclipse-temurin:21-jre` | JRE 运行 | 207–375 MB |
 | hello-rust | Rust | `debian:bookworm-slim` + 二进制 | `USER nobody` | ~76–98 MB |
 | hello-ruby | Ruby | `ruby:3.3.8-alpine` | `adduser -D -u 1000 appuser` | ~70–76 MB |
-| hello-php | PHP | `php:8.3.8-cli-alpine` | `adduser -D -u 1000 appuser` | ~96–105 MB |
+| hello-php | PHP | `php:8.3.36-cli-alpine` | `adduser -D -u 1000 appuser` | ~96–105 MB |
 | hello-dotnet | .NET | `aspnet:8.0-bookworm-slim` | `useradd -M -u 1000 appuser` | ~218–250 MB |
 | hello-python | Python | `python:3.12.7-slim-bookworm` | `useradd -m -u 1000 appuser` | ~132–157 MB |
 

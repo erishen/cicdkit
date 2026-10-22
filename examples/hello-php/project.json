@@ -1,6 +1,6 @@
 {
   "name": "hello-php",
-  "description": "示例项目：PHP 零依赖脚本（php:8.3.8-cli-alpine 瘦身镜像 + PHP 内置服务器 `php -S` 提供）。方案 B（纯本地、无外部 registry）：本地 docker build 出 hello-php:<timestamp> 镜像，docker save 导入 k3s containerd，再 kubectl set-image 滚动更新。无需任何镜像仓库。",
+  "description": "示例项目：PHP 零依赖脚本（php:8.3.36-cli-alpine 瘦身镜像 + PHP 内置服务器 `php -S` 提供）。方案 B（纯本地、无外部 registry）：本地 docker build 出 hello-php:<timestamp> 镜像，docker save 导入 k3s containerd，再 kubectl set-image 滚动更新。无需任何镜像仓库。",
   "repository": "https://github.com/erishen/cicdkit",
   "branch": "main",
   "build": {
