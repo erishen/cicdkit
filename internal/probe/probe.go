@@ -93,15 +93,32 @@ func Run(ctx context.Context, p store.Project, cfg *config.Config, targetName st
 	return last
 }
 
-// probeURL performs a single HTTP check against url. It retries once (after a
-// short backoff) on a transport error so a brief not-yet-listening window
-// right after a rollout does not immediately fail the probe. A definitive HTTP
-// response (any status) is returned without retry.
+// package-level so tests can shorten the backoffs without waiting the real
+// 2s/6s per retry.
+var (
+	probeTransportBackoff = 2 * time.Second
+	probeHTTP5xxBackoff   = 6 * time.Second
+)
+
+// probeURL performs a single HTTP check against url with a transient-failure
+// retry policy:
+//   - transport errors (service not listening yet): probeTransportBackoff, one
+//     retry (unchanged from before);
+//   - a definitive 5xx response: retried with probeHTTP5xxBackoff, up to two
+//     more attempts. This is the classic right-after-deploy window: `docker run`
+//     starts the container, but the entrypoint needs a few seconds to bring up
+//     the SSR socket + the app in front; host nginx answers 502/503 until the
+//     upstream is ready. A single 502 at t+0.1s is expected, so we give the
+//     upstream time to boot.
+//   - 4xx responses are definitive (service up, auth/route issue) — no retry.
 func probeURL(ctx context.Context, method, url string, spec store.ProbeSpec, timeout time.Duration) store.ProbeResult {
-	const maxAttempts = 2
-	var lastErr error
-	var dur time.Duration
-	for attempt := 1; attempt <= maxAttempts; attempt++ {
+	const (
+		maxTransportRetries = 1 // +1 initial attempt = 2 total (previous behavior)
+		maxHTTP5xxRetries   = 2 // up to ~12s of extra boot tolerance
+	)
+	var last store.ProbeResult
+	transportTries, http5xxTries := 0, 0
+	for {
 		// Declare bodyReader as the io.Reader interface and only assign a
 		// concrete *strings.Reader when there is a body. Assigning nil to a
 		// typed variable (e.g. bodyReader = nil after strings.NewReader) would
@@ -126,22 +143,24 @@ func probeURL(ctx context.Context, method, url string, spec store.ProbeSpec, tim
 		}
 		start := time.Now()
 		resp, err := http.DefaultClient.Do(req)
-		dur = time.Since(start)
+		dur := time.Since(start)
 		cancel()
 		if err != nil {
-			lastErr = err
-			if attempt < maxAttempts && ctx.Err() == nil {
-				time.Sleep(2 * time.Second)
+			if transportTries < maxTransportRetries && ctx.Err() == nil {
+				transportTries++
+				time.Sleep(probeTransportBackoff)
 				continue
 			}
 			return store.ProbeResult{Method: method, URL: url, DurationMs: dur.Milliseconds(), Status: "err", Error: err.Error(), Detail: "请求失败: " + err.Error()}
 		}
-		return parseResponse(method, url, spec, resp, dur)
+		last = parseResponse(method, url, spec, resp, dur)
+		if last.StatusCode >= 500 && http5xxTries < maxHTTP5xxRetries && ctx.Err() == nil {
+			http5xxTries++
+			time.Sleep(probeHTTP5xxBackoff)
+			continue
+		}
+		return last
 	}
-	if lastErr != nil {
-		return store.ProbeResult{Method: method, URL: url, Status: "err", Error: lastErr.Error(), Detail: "请求失败: " + lastErr.Error()}
-	}
-	return store.ProbeResult{Method: method, URL: url, Status: "err", Detail: "请求失败"}
 }
 
 // parseResponse turns an HTTP response into a ProbeResult, applying the

@@ -4,7 +4,9 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -14,6 +16,15 @@ import (
 
 func projWithProbe(spec store.ProbeSpec) store.Project {
 	return store.Project{Name: "demo", Deploy: store.DeploySpec{Method: "local-k3s"}, Probe: spec}
+}
+
+func TestMain(m *testing.M) {
+	// Shorten the real 2s/6s backoffs so retry tests run in milliseconds.
+	oldT, oldH := probeTransportBackoff, probeHTTP5xxBackoff
+	probeTransportBackoff, probeHTTP5xxBackoff = 5*time.Millisecond, 5*time.Millisecond
+	code := m.Run()
+	probeTransportBackoff, probeHTTP5xxBackoff = oldT, oldH
+	os.Exit(code)
 }
 
 func TestDisabledProbeSkips(t *testing.T) {
@@ -66,6 +77,34 @@ func TestProbeStatusMismatchFails(t *testing.T) {
 	r := Run(context.Background(), p, &config.Config{}, "")
 	if r.Status != "fail" {
 		t.Fatalf("期望 fail，得到 %s (%s)", r.Status, r.Detail)
+	}
+}
+
+// TestProbeRetries5xxUntilUpstreamRecovers reproduces the right-after-deploy
+// window: the first probe hits a 502 (upstream still booting), but a later
+// retry succeeds once the upstream is up. The probe must eventually report
+// ok rather than failing on the first 502.
+func TestProbeRetries5xxUntilUpstreamRecovers(t *testing.T) {
+	var reqs uint64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if atomic.AddUint64(&reqs, 1) < 2 {
+			w.WriteHeader(502) // upstream not ready yet
+			return
+		}
+		w.WriteHeader(200) // recovered
+	}))
+	defer srv.Close()
+
+	p := projWithProbe(store.ProbeSpec{Enabled: true, URL: srv.URL, ExpectedStatus: 200})
+	r := Run(context.Background(), p, &config.Config{}, "")
+	if r.Status != "ok" {
+		t.Fatalf("首个 502 后重试应最终 ok，得到 %s (%s)", r.Status, r.Detail)
+	}
+	if r.StatusCode != 200 {
+		t.Fatalf("最终应命中 200，得到 %d", r.StatusCode)
+	}
+	if got := atomic.LoadUint64(&reqs); got < 2 {
+		t.Fatalf("应至少请求 2 次（含重试），实际 %d", got)
 	}
 }
 
