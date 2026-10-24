@@ -42,3 +42,6 @@ cmd/server/web/dist/
 
 # Rust 编译产物
 **/target/
+
+# Go 构建/模块/测试缓存 (沙箱内 GOCACHE/GOMODCACHE/GOPATH 指向本地 .gocache 目录)
+.gocache/
