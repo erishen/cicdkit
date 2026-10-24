@@ -210,22 +210,32 @@ func parseResponse(method, url string, spec store.ProbeSpec, resp *http.Response
 //
 // When no target can be resolved the returned slice is empty and note explains
 // why (the caller turns that into a "skip" rather than a hard failure).
+//
+// Resolution order:
+//  1. Per-target URL (probe.urls[targetName]) — an explicit per-target address
+//     (e.g. an nginx domain like resume.erishen.cn:443) always wins over the
+//     derived IP:port. This matters for targets whose bare port is not
+//     published to the internet (loopback-only container port behind nginx):
+//     the IP:port probe would EOF, but the domain probe succeeds.
+//  2. Derived IP:port for ssh targets (host is almost always filled), or the
+//     per-method/global URL when no host is available.
+//  3. Cluster Service derivation for k8s-style methods.
 func resolveURL(ctx context.Context, p store.Project, cfg *config.Config, targetName string) ([]string, string) {
 	method := p.Deploy.Method
-	if method == "ssh" {
-		// ssh 部署没有集群 Service，主机来自目标自身的 deploy.ssh_host
-		// （表单会从 .env 的 CICD_SSH_HOST_<厂商> 预填），所以探针 URL
-		// 优先由 ssh host + 探针端口推导。目标没配主机时才回退到 URL 覆盖。
-		if urls, _ := deriveFromSSH(p); len(urls) > 0 {
-			return urls, ""
-		}
-	}
-	// A per-target probe URL (keyed by the named DeployTarget's name) wins over
-	// the per-method URL, so multiple ssh targets (e.g. 腾讯云 vs AWS) can each
-	// probe their own address rather than sharing probe.urls["ssh"].
+	// A named target with an explicit probe URL (probe.urls[<target>]) always
+	// wins over the derived IP:port.
 	if tn := strings.TrimSpace(targetName); tn != "" {
 		if u := strings.TrimSpace(p.Probe.URLs[tn]); u != "" {
 			return []string{u}, ""
+		}
+	}
+	if method == "ssh" {
+		// ssh 部署没有集群 Service，主机来自目标自身的 deploy.ssh_host
+		// （表单会从 .env 的 CICD_SSH_HOST_<厂商> 预填），所以探针 URL
+		// 其次由 ssh host + 探针端口推导；目标既没配域名 URL 也没配主机
+		// 时才回退到按方法/全局的 URL 覆盖。
+		if urls, _ := deriveFromSSH(p); len(urls) > 0 {
+			return urls, ""
 		}
 	}
 	if u := strings.TrimSpace(p.Probe.URLs[method]); u != "" {

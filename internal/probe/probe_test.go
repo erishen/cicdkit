@@ -222,6 +222,27 @@ func TestResolveURLSSHTargetHostBeatsPerMethodOverride(t *testing.T) {
 	}
 }
 
+func TestResolveURLPerTargetURLBeatsSSHDerive(t *testing.T) {
+	// 命名目标配了 probe.urls[<target>] 时，应优先于 ssh 的 IP:port 推导。
+	// 典型场景：容器端口只绑 127.0.0.1（公网打不到 IP:8090），但域名走
+	// nginx 443 可达 —— 探测应打域名而非裸 IP。
+	p := store.Project{
+		Name:   "demo",
+		Deploy: store.DeploySpec{Method: "ssh", SSHHost: "47.101.189.64", SSHProbePort: "8090"},
+		Probe:  store.ProbeSpec{Enabled: true, URLs: map[string]string{"阿里云-resume": "https://resume.erishen.cn"}},
+	}
+	urls, note := resolveURL(context.Background(), p, &config.Config{}, "阿里云-resume")
+	if len(urls) != 1 || urls[0] != "https://resume.erishen.cn" {
+		t.Fatalf("命名目标的 per-target URL 应优先于 IP 推导，得到 %v (note=%q)", urls, note)
+	}
+
+	// 未命名（主 deploy）时，IP:port 推导仍生效（不改变主 deploy 行为）。
+	urls, _ = resolveURL(context.Background(), p, &config.Config{}, "")
+	if len(urls) != 1 || urls[0] != "http://47.101.189.64:8090" {
+		t.Fatalf("主 deploy（无命名目标）应仍用 ssh IP:port 推导，得到 %v", urls)
+	}
+}
+
 func TestFirstNodeInternalIP(t *testing.T) {
 	with := `{"items":[{"status":{"addresses":[{"type":"InternalIP","address":"192.168.0.1"},{"type":"ExternalIP","address":"1.2.3.4"}]}}]}`
 	if got := firstNodeInternalIP(with); got != "192.168.0.1" {
