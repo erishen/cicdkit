@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -354,23 +355,58 @@ func (s *Server) handleProjectVisits(w http.ResponseWriter, r *http.Request, id 
 	}
 	url, pin := visitsEndpoint(p)
 	if url == "" || pin == "" {
+		// 未配置访客统计（目标 note 无公网域名 / run_args 无 PIN）→ 前端静默隐藏。
 		writeJSON(w, http.StatusOK, map[string]any{"configured": false})
 		return
 	}
 	client := &http.Client{Timeout: 8 * time.Second}
-	resp, err := client.Get(url + "/api/visits?pin=" + pin)
-	if err != nil {
-		writeError(w, http.StatusBadGateway, "访客统计接口不可达: "+err.Error())
-		return
-	}
-	defer resp.Body.Close()
-	var out map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		writeError(w, http.StatusBadGateway, "访客统计响应解析失败: "+err.Error())
+	out, ferr := fetchVisits(client, url, pin)
+	if ferr != nil {
+		// 上游不可达 / 5xx / 解析失败：站点或远端容器挂了。返回 200 +
+		// configured:true + online:false，让前端展示「断线」提示而非静默隐藏。
+		writeVisitsOffline(w, url, ferr.Error())
 		return
 	}
 	out["configured"] = true
+	out["online"] = true
 	writeJSON(w, http.StatusOK, out)
+}
+
+// fetchVisits pulls the online visits payload from the app's own
+// /api/visits endpoint. It returns the parsed map on success, or a
+// human-readable error describing why the upstream is down (so the caller can
+// mark the block offline). Testing points `url` at a plain httptest backend.
+func fetchVisits(client *http.Client, url, pin string) (map[string]any, error) {
+	resp, err := client.Get(url + "/api/visits?pin=" + pin)
+	if err != nil {
+		return nil, fmt.Errorf("上游不可达: %s", err.Error())
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		snippet := strings.TrimSpace(string(body))
+		if len(snippet) > 200 {
+			snippet = snippet[:200] + "…"
+		}
+		return nil, fmt.Errorf("上游 HTTP %d（服务未就绪或 nginx 反代故障）: %s",
+			resp.StatusCode, snippet)
+	}
+	var out map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, fmt.Errorf("上游响应解析失败: %s", err.Error())
+	}
+	return out, nil
+}
+
+// writeVisitsOffline emits a configured-but-offline payload so the UI can show
+// a red “断线” banner instead of silently hiding the visits block.
+func writeVisitsOffline(w http.ResponseWriter, url, reason string) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"configured": true,
+		"online":     false,
+		"url":        url,
+		"error":      reason,
+	})
 }
 
 // visitsEndpoint 从项目部署目标推导线上访客统计 URL 与 PIN。

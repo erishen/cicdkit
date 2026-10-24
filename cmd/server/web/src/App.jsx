@@ -77,8 +77,9 @@ function useInfiniteSentinel(loadMore, hasMore, onBusy) {
   return ref
 }
 
-// 访客统计区块:仅当项目配置了 PIN + 公网域名时显示(后端 visits 返回
-// configured:true)。数据来自线上埋点,owner-only;拉取失败/未配置静默隐藏。
+// 访客统计区块：仅当项目配置了 PIN + 公网域名时显示（后端 visits 返回
+// configured:true）。数据来自线上埋点，owner-only。
+// 未配置 → 静默隐藏；配置了但上游不可用（断线）→ 红色断线横幅 + 原因。
 function VisitsBlock({ project }) {
   const [v, setV] = useState(null)
   useEffect(() => {
@@ -87,6 +88,17 @@ function VisitsBlock({ project }) {
     return () => { on = false }
   }, [project.id])
   if (!v) return null
+  if (v.online === false) {
+    return (
+      <div className="visits">
+        <div className="visits-head">访客统计</div>
+        <div className="visits-offline" title={v.error || ''}>
+          <span className="visits-offline-dot" /> 断线：{v.url ? v.url : '线上站点'} 不可访问
+        </div>
+        {v.error && <div className="visits-offline-reason">{v.error}</div>}
+      </div>
+    )
+  }
   const days = (v.days || []).slice(0, 7).reverse()
   return (
     <div className="visits">
