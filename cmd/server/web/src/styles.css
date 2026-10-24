@@ -67,24 +67,30 @@ body {
 .card .row { margin-top: 10px; }
 .card .tags { margin-top: 8px; display: flex; gap: 6px; flex-wrap: wrap; }
 /* 访客统计区块(owner-only,线上埋点数据):项目配置了 PIN+公网域名才渲染 */
-.card .visits { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--border); }
-.card .visits-head { color: var(--muted); font-size: 11px; margin-bottom: 6px; }
-.card .visits-grid { display: flex; gap: 14px; font-size: 12px; color: var(--muted); }
-.card .visits-num b { font-size: 15px; color: var(--text); margin-right: 3px; }
-.card .visits-days { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
-.card .visits-day { font-size: 11px; color: var(--muted); background: var(--surface-2); border-radius: 4px; padding: 1px 6px; }
-.card .visits-recent { margin-top: 8px; border-top: 1px solid var(--border); padding-top: 6px; }
-.card .visits-recent-head { color: var(--muted); font-size: 11px; margin-bottom: 4px; }
-.card .visits-recent ul { margin: 0; padding: 0; list-style: none; max-height: 180px; overflow-y: auto; }
-.card .visits-recent li { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); padding: 2px 0; }
-.card .visits-ip { color: var(--text); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.card .visits-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px; }
-.card .visits-ref { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 180px; color: var(--accent, #7aa2f7); }
-.card .visits-time { margin-left: auto; white-space: nowrap; }
+.visits { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--border); }
+.visits-head { color: var(--muted); font-size: 11px; margin-bottom: 6px; }
+.visits-grid { display: flex; gap: 14px; font-size: 12px; color: var(--muted); }
+.visits-num b { font-size: 15px; color: var(--text); margin-right: 3px; }
+.visits-days { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.visits-day { font-size: 11px; color: var(--muted); background: var(--surface-2); border-radius: 4px; padding: 1px 6px; }
+.visits-recent { margin-top: 8px; border-top: 1px solid var(--border); padding-top: 6px; }
+.visits-recent-head { color: var(--muted); font-size: 11px; margin-bottom: 4px; }
+.visits-recent ul { margin: 0; padding: 0; list-style: none; max-height: 180px; overflow-y: auto; }
+.visits-recent li { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); padding: 2px 0; }
+.visits-ip { color: var(--text); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.visits-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px; }
+.visits-ref { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 180px; color: var(--accent, #7aa2f7); }
+.visits-time { margin-left: auto; white-space: nowrap; }
 /* 访客统计断线横幅：上游 5xx / 不可达时由后端标记 online:false，前端显示红色提示 */
-.card .visits-offline { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--danger, #dc2626); background: #fef2f2; border: 1px solid #fecaca; border-radius: 6px; padding: 6px 8px; }
-.card .visits-offline-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--danger, #dc2626); flex: 0 0 auto; box-shadow: 0 0 0 3px rgba(220, 38, 38, .15); }
-.card .visits-offline-reason { font-size: 11px; color: var(--muted); margin-top: 4px; word-break: break-all; }
+.visits-offline { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--danger, #dc2626); background: #fef2f2; border: 1px solid #fecaca; border-radius: 6px; padding: 6px 8px; }
+.visits-offline-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--danger, #dc2626); flex: 0 0 auto; box-shadow: 0 0 0 3px rgba(220, 38, 38, .15); }
+.visits-offline-reason { font-size: 11px; color: var(--muted); margin-top: 4px; word-break: break-all; }
+/* 访客统计 Tab：每个项目一栏，标题 + VisitsBlock */
+.visits-item { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; background: var(--surface); }
+.visits-item .visits { margin-top: 6px; padding-top: 8px; }
+.visits-item-head { display: flex; align-items: center; gap: 8px; font-size: 13px; margin-bottom: 4px; }
+.visits-item-head .muted { font-size: 11px; }
+.visits-item .visits-empty { color: var(--muted); font-size: 12px; }
 
 /* Buttons */
 .btn {

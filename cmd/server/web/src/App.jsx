@@ -80,13 +80,36 @@ function useInfiniteSentinel(loadMore, hasMore, onBusy) {
 // 访客统计区块：仅当项目配置了 PIN + 公网域名时显示（后端 visits 返回
 // configured:true）。数据来自线上埋点，owner-only。
 // 未配置 → 静默隐藏；配置了但上游不可用（断线）→ 红色断线横幅 + 原因。
-function VisitsBlock({ project }) {
+function VisitsBlock({ project, refreshKey }) {
   const [v, setV] = useState(null)
+  const [state, setState] = useState('loading') // loading | online | offline | unconfigured
   useEffect(() => {
     let on = true
-    API.visits(project.id).then((d) => { if (on && d && d.configured) setV(d) }).catch(() => {})
+    setV(null); setState('loading')
+    API.visits(project.id).then((d) => {
+      if (!on) return
+      if (!d || !d.configured) { setState('unconfigured'); return }
+      if (d.online === false) { setV(d); setState('offline'); return }
+      setV(d); setState('online')
+    }).catch(() => { if (on) setState('error') })
     return () => { on = false }
-  }, [project.id])
+  }, [project.id, refreshKey])
+  if (state === 'unconfigured') {
+    return (
+      <div className="visits">
+        <div className="visits-head">访客统计</div>
+        <div className="visits-empty">未配置访客统计：线上应用未提供 /api/visits（需 Lume 应用实现访问埋点 + PIN 门禁，参考 lume-crm）</div>
+      </div>
+    )
+  }
+  if (state === 'error') {
+    return (
+      <div className="visits">
+        <div className="visits-head">访客统计</div>
+        <div className="visits-empty">拉取失败（网络或服务异常），点击 Tab 右上角「刷新」重试</div>
+      </div>
+    )
+  }
   if (!v) return null
   if (v.online === false) {
     return (
@@ -166,6 +189,7 @@ export default function App() {
   // 后端构建戳：footer 展示，用于确认浏览器连的是否为最新二进制（修复分页重叠后尤为关键）。
   const [backendStamp, setBackendStamp] = useState('')
   const [activeTab, setActiveTab] = useState('runs')
+  const [visitsRefresh, setVisitsRefresh] = useState(0)
   const [runs, setRuns] = useState([])
   const [deployments, setDeployments] = useState([])
   // 分页：每页条数固定；用 ref 记录已加载偏移与总数，避免闭包拿到旧值。
@@ -396,7 +420,6 @@ export default function App() {
                   {p.deploy?.method && <span className="tag">{p.deploy.method}</span>}
                   {p.build?.push && <span className="tag">push</span>}
                 </div>
-                <VisitsBlock project={p} />
                 {(() => {
                   // 每个发布目标（命名目标 + 主方法）单独展示最新一次成功部署，
                   // 而不是只显示全局最后一次（旧逻辑会互相覆盖）。
@@ -501,6 +524,8 @@ export default function App() {
               onClick={() => setActiveTab('runs')}>运行记录</button>
             <button className={'tab ' + (activeTab === 'deploys' ? 'active' : '')}
               onClick={() => setActiveTab('deploys')}>部署历史</button>
+            <button className={'tab ' + (activeTab === 'visits' ? 'active' : '')}
+              onClick={() => setActiveTab('visits')}>访客统计</button>
           </div>
 
           <div className={'tab-panel ' + (activeTab === 'runs' ? '' : 'hidden')}>
@@ -591,6 +616,25 @@ export default function App() {
                     </>)}
               </div>
             )}
+          </div>
+
+          <div className={'tab-panel ' + (activeTab === 'visits' ? '' : 'hidden')}>
+            <div className="section-head">
+              <h2>访客统计 <span className="count">共 {projects.length} 个项目</span></h2>
+              <div className="section-actions">
+                <button className="btn btn-ghost btn-sm" onClick={() => setVisitsRefresh((k) => k + 1)}>刷新</button>
+              </div>
+            </div>
+            {projects.length === 0 && <div className="empty">暂无项目。</div>}
+            {projects.map((p) => (
+              <div key={p.id} className="visits-item">
+                <div className="visits-item-head">
+                  <strong>{p.name}</strong>
+                  <span className="muted">{p.repository ? p.repository.replace(/^https?:\/\//, '') : ''}</span>
+                </div>
+                <VisitsBlock project={p} refreshKey={visitsRefresh} />
+              </div>
+            ))}
           </div>
         </section>
       </main>
