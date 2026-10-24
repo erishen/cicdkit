@@ -281,3 +281,48 @@ func TestResolveRegistrySpec(t *testing.T) {
 		t.Fatalf("项目字段应优先于 env，得到 user=%q pass=%q", reg2.Username, reg2.Password)
 	}
 }
+
+// TestRedactedVisitPinRoundTrip 锁定 visit-PIN 脱敏/还原契约:
+// GET 时 Redacted() 把 run-args 里的 *_VISIT_PIN 值掩成 MaskedSecret,
+// 但 MergeSecrets() 回写时按原值还原, 保证编辑保存不会把真 PIN 擦成掩码。
+func TestRedactedVisitPinRoundTrip(t *testing.T) {
+	orig := Project{Name: "tnsbp"}
+	orig.Deploy.SSHRunArgs = "-e TNSBP_VISIT_PIN=realpin123 -e TNSBP_IGNORE_IPS=1.2.3.4 -v /d:/app/.data"
+	orig.Targets = []DeployTarget{{Name: "阿里云-resume", DeploySpec: DeploySpec{SSHRunArgs: "-e TNSBP_VISIT_PIN=realpin123"}}}
+
+	red := orig.Redacted()
+	if strings.Contains(red.Deploy.SSHRunArgs, "realpin123") {
+		t.Fatalf("Redacted 泄漏了主 deploy 的 PIN: %q", red.Deploy.SSHRunArgs)
+	}
+	if !strings.Contains(red.Deploy.SSHRunArgs, "TNSBP_VISIT_PIN="+MaskedSecret) {
+		t.Fatalf("主 deploy 的 PIN 未掩码: %q", red.Deploy.SSHRunArgs)
+	}
+	if strings.Contains(red.Targets[0].SSHRunArgs, "realpin123") {
+		t.Fatalf("Redacted 泄漏了 target 的 PIN: %q", red.Targets[0].SSHRunArgs)
+	}
+	// 原对象未被改动
+	if !strings.Contains(orig.Deploy.SSHRunArgs, "realpin123") {
+		t.Fatal("Redacted 不应修改原对象")
+	}
+	// 非 PIN 字段应原样保留
+	if !strings.Contains(red.Deploy.SSHRunArgs, "TNSBP_IGNORE_IPS=1.2.3.4") {
+		t.Fatalf("非 PIN 字段被误掩码: %q", red.Deploy.SSHRunArgs)
+	}
+
+	// 回写: 掩码值应还原成原 PIN
+	merged := red.MergeSecrets(orig)
+	if !strings.Contains(merged.Deploy.SSHRunArgs, "TNSBP_VISIT_PIN=realpin123") {
+		t.Fatalf("MergeSecrets 未还原主 deploy PIN: %q", merged.Deploy.SSHRunArgs)
+	}
+	if !strings.Contains(merged.Targets[0].SSHRunArgs, "TNSBP_VISIT_PIN=realpin123") {
+		t.Fatalf("MergeSecrets 未还原 target PIN: %q", merged.Targets[0].SSHRunArgs)
+	}
+
+	// 用户在 UI 里改了一个新的 PIN(非掩码), 应保留新值而不是被旧值覆盖
+	red2 := orig.Redacted()
+	red2.Deploy.SSHRunArgs = "-e TNSBP_VISIT_PIN=newpin999 -e TNSBP_IGNORE_IPS=1.2.3.4"
+	merged2 := red2.MergeSecrets(orig)
+	if !strings.Contains(merged2.Deploy.SSHRunArgs, "TNSBP_VISIT_PIN=newpin999") {
+		t.Fatalf("新 PIN 应被保留, 得到: %q", merged2.Deploy.SSHRunArgs)
+	}
+}

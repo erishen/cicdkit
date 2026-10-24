@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -328,6 +329,62 @@ func parseProbeURL(raw string) (*url.URL, error) {
 	return url.Parse(strings.TrimSpace(raw))
 }
 
+// visitPinRe matches any "<APP>_VISIT_PIN=<value>" inside a run-args string
+// (e.g. "LUME_CRM_VISIT_PIN" / "TNSBP_VISIT_PIN"). These carry the owner-only
+// visitor-stats PIN, so they must not be echoed back over the API or into the UI.
+// Group 1 = the "<APP>_VISIT_PIN=" prefix; group 2 = the value.
+var visitPinRe = regexp.MustCompile(`([A-Z][A-Z0-9_]*_VISIT_PIN=)(\S+)`)
+
+// redactVisitPins masks the value of any *_VISIT_PIN= token inside run-args.
+func redactVisitPins(s string) string {
+	if s == "" || !visitPinRe.MatchString(s) {
+		return s
+	}
+	return visitPinRe.ReplaceAllString(s, `${1}`+MaskedSecret)
+}
+
+// cloneTargets returns a fresh slice whose elements are value copies of the
+// input. Project.Targets is a slice that shares its backing array with the
+// caller's object, so mutating p.Targets[i] in place would clobber the caller.
+// These helpers clone before writing so Redacted()/MergeSecrets() never leak
+// mutations back into the stored project.
+func cloneTargets(in []DeployTarget) []DeployTarget {
+	if len(in) == 0 {
+		return in
+	}
+	out := make([]DeployTarget, len(in))
+	copy(out, in)
+	return out
+}
+
+// restoreVisitPins keeps the stored PIN on a GET->edit->PUT round trip: any
+// masked visit-PIN slot in the incoming run-args is replaced by the original
+// value (if present), mirroring how MergeSecrets preserves registry passwords.
+func restoreVisitPins(incoming, stored string) string {
+	if incoming == "" || stored == "" {
+		return incoming
+	}
+	// Build a prefix->real-value map from the stored (unmasked) run-args.
+	realVals := map[string]string{}
+	for _, m := range visitPinRe.FindAllStringSubmatch(stored, -1) {
+		realVals[m[1]] = m[2]
+	}
+	return visitPinRe.ReplaceAllStringFunc(incoming, func(slot string) string {
+		parts := visitPinRe.FindStringSubmatch(slot)
+		if parts == nil {
+			return slot
+		}
+		prefix, masked := parts[1], parts[2]
+		if !strings.Contains(masked, MaskedSecret) {
+			return slot // an unmasked (possibly new) value — keep it as-is
+		}
+		if real, ok := realVals[prefix]; ok {
+			return prefix + real // restore the original secret
+		}
+		return slot
+	})
+}
+
 // Redacted returns a copy safe to send over the API: stored credentials and
 // local filesystem paths are replaced with MaskedSecret so a GET never leaks a
 // registry password nor discloses the operator's home directory / username via
@@ -341,6 +398,16 @@ func (p Project) Redacted() Project {
 	}
 	if p.Deploy.Kubeconfig != "" {
 		p.Deploy.Kubeconfig = MaskedSecret
+	}
+	// run-args may carry owner-only visit-PINs; mask them everywhere they appear.
+	if p.Deploy.SSHRunArgs != "" {
+		p.Deploy.SSHRunArgs = redactVisitPins(p.Deploy.SSHRunArgs)
+	}
+	p.Targets = cloneTargets(p.Targets)
+	for i := range p.Targets {
+		if p.Targets[i].SSHRunArgs != "" {
+			p.Targets[i].SSHRunArgs = redactVisitPins(p.Targets[i].SSHRunArgs)
+		}
 	}
 	return p
 }
@@ -358,6 +425,15 @@ func (p Project) MergeSecrets(old Project) Project {
 	}
 	if p.Deploy.Kubeconfig == "" || p.Deploy.Kubeconfig == MaskedSecret {
 		p.Deploy.Kubeconfig = old.Deploy.Kubeconfig
+	}
+	// Restore masked visit-PINs in run-args so a masked round-trip does not
+	// overwrite the stored PIN with the literal "********".
+	p.Deploy.SSHRunArgs = restoreVisitPins(p.Deploy.SSHRunArgs, old.Deploy.SSHRunArgs)
+	p.Targets = cloneTargets(p.Targets)
+	for i := range p.Targets {
+		if i < len(old.Targets) {
+			p.Targets[i].SSHRunArgs = restoreVisitPins(p.Targets[i].SSHRunArgs, old.Targets[i].SSHRunArgs)
+		}
 	}
 	return p
 }
