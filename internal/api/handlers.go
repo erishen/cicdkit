@@ -334,11 +334,12 @@ func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request, id string
 // ---- 访客统计 ----
 
 // visitsPinRe / visitsDomainRe:从部署配置推导访客统计的 PIN 与线上域名——
-// PIN 取任一 ssh_run_args 里的 LUME_CRM_VISIT_PIN=xxx,域名取 target note 的
-// "公网域名 xxx"。两者齐备才代理线上 /api/visits(owner-only,带 PIN 校验),
-// 否则返回 configured=false,前端不展示。
+// PIN 取任一 ssh_run_args 里形如 <APP>_VISIT_PIN=xxx 的值(各应用自定变量名,
+// 如 LUME_CRM_VISIT_PIN / TNSBP_VISIT_PIN),域名取 target note 的「公网域名
+// xxx」。两者齐备才代理线上 /api/visits(owner-only,带 PIN 校验),否则返回
+// configured=false,前端不展示。
 var (
-	visitsPinRe    = regexp.MustCompile(`LUME_CRM_VISIT_PIN=([A-Za-z0-9]+)`)
+	visitsPinRe    = regexp.MustCompile(`([A-Z][A-Z0-9_]*_VISIT_PIN)=(\S+)`)
 	visitsDomainRe = regexp.MustCompile(`公网域名\s+(\S+)`)
 )
 
@@ -422,8 +423,10 @@ func visitsEndpoint(p store.Project) (url, pin string) {
 		specs = append(specs, t.DeploySpec)
 	}
 	for _, d := range specs {
-		if m := visitsPinRe.FindStringSubmatch(d.SSHRunArgs); len(m) > 1 {
-			pin = m[1]
+		// matches any "<APP>_VISIT_PIN=<value>"; the PIN value is the 2nd
+		// capture group.
+		if m := visitsPinRe.FindStringSubmatch(d.SSHRunArgs); len(m) > 2 {
+			pin = m[2]
 			break
 		}
 	}
