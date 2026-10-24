@@ -24,6 +24,7 @@ const PROBE_VIEW = {
 export default function LogModal({ runId, onClose, onRunDone }) {
   const [run, setRun] = useState(null)
   const [fullscreen, setFullscreen] = useState(false)
+  const [copied, setCopied] = useState(false)
   const logRef = useRef(null)
   const timer = useRef(null)
 
@@ -60,6 +61,32 @@ export default function LogModal({ runId, onClose, onRunDone }) {
     try { await API.cancelRun(runId); load() } catch (e) { /* ignore */ }
   }
 
+  // 复制当前日志输出到剪贴板；优先走 async Clipboard API，非安全上下文
+  // （如 http://LAN-IP）或旧浏览器回退到 execCommand。
+  const copyLog = async () => {
+    const text = run ? (run.log || '(无输出)') : ''
+    let ok = false
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text)
+        ok = true
+      } else {
+        const ta = document.createElement('textarea')
+        ta.value = text
+        ta.style.position = 'fixed'
+        ta.style.left = '-9999px'
+        document.body.appendChild(ta)
+        ta.select()
+        ok = document.execCommand('copy')
+        document.body.removeChild(ta)
+      }
+    } catch (e) { /* 兜底失败则静默 */ }
+    if (ok) {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1600)
+    }
+  }
+
   const live = run && (run.status === 'running' || run.status === 'queued')
 
   return (
@@ -72,6 +99,15 @@ export default function LogModal({ runId, onClose, onRunDone }) {
             {live && (
               <button className="btn btn-warn btn-sm" onClick={cancel} style={{ marginLeft: 8 }}>取消运行</button>
             )}
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={copyLog}
+              disabled={!run}
+              style={{ marginLeft: 8 }}
+              title="复制完整日志"
+            >
+              {copied ? '✓ 已复制' : '⧉ 复制日志'}
+            </button>
             <button
               className="btn btn-ghost btn-sm"
               onClick={() => setFullscreen((v) => !v)}

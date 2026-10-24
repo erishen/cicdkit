@@ -127,11 +127,27 @@ export default function App() {
   // Per-project trigger guard: a request in flight, plus a short cooldown
   // after each successful trigger, so rapid double-clicks cannot launch a
   // burst of concurrent pipelines against the same project.
+  //
+  // 注意：inFlight 必须是 state 而非 ref——release 时只有 setState 能触发
+  // 按钮重渲染；之前用 ref + 15s 冷却且到期无重渲染点，按钮会一直停在
+  // 「触发中…」。现在冷却缩短到 2s（只挡连点），并在到期时刻清理冷却项，
+  // 让 UI 准时恢复可用。
+  const [inFlight, setInFlight] = useState({})
   const [cooldowns, setCooldowns] = useState({})
-  const inFlight = useRef({})
-  const blockProject = (id) => { inFlight.current[id] = true; setCooldowns(c => ({ ...c, [id]: Date.now() + 15000 })) }
-  const releaseProject = (id) => { delete inFlight.current[id] }
-  const isTriggerBlocked = (id) => !!inFlight.current[id] || (cooldowns[id] || 0) > Date.now()
+  const TRIGGER_COOLDOWN_MS = 2000
+  const blockProject = (id) => {
+    setInFlight(c => ({ ...c, [id]: true }))
+    setCooldowns(c => ({ ...c, [id]: Date.now() + TRIGGER_COOLDOWN_MS }))
+    // 冷却到期时若仍残留该项目的冷却项，清理它以触发一次重渲染，
+    // 按钮不再需要等其它事件才恢复。
+    setTimeout(() => {
+      setCooldowns(c => { if (!(id in c)) return c; const n = { ...c }; delete n[id]; return n })
+    }, TRIGGER_COOLDOWN_MS)
+  }
+  const releaseProject = (id) => {
+    setInFlight(c => { if (!(id in c)) return c; const n = { ...c }; delete n[id]; return n })
+  }
+  const isTriggerBlocked = (id) => !!inFlight[id] || (cooldowns[id] || 0) > Date.now()
   const [filter, setFilter] = useState('')
   const [health, setHealth] = useState('连接中…')
   const [healthCls, setHealthCls] = useState('badge-unknown')
@@ -293,16 +309,16 @@ export default function App() {
     blockProject(id)
     setPubMenu(null)
     try {
-      const run = await API.trigger(id, 'deploy', { target })
-      showToast('已触发（复用/必要时自动构建）: ' + run.id, 'ok')
-      setLogRun(run.id); loadRuns(); loadDeployments()
-      return
-    } catch (e) {
-      if (!/成功构建/.test(e.message)) { showToast('触发失败: ' + e.message, 'err'); return }
-    }
-    try {
-      const run = await API.trigger(id, 'pipeline', { target })
-      showToast('已触发（先构建再发布）: ' + run.id, 'ok')
+      let run
+      try {
+        run = await API.trigger(id, 'deploy', { target })
+        showToast('已触发（复用/必要时自动构建）: ' + run.id, 'ok')
+      } catch (e) {
+        if (!/成功构建/.test(e.message)) { showToast('触发失败: ' + e.message, 'err'); return }
+        // deploy 判定需要先构建 → 回退为完整流水线（build + deploy）
+        run = await API.trigger(id, 'pipeline', { target })
+        showToast('已触发（先构建再发布）: ' + run.id, 'ok')
+      }
       setLogRun(run.id); loadRuns(); loadDeployments()
     } catch (e2) { showToast('触发失败: ' + e2.message, 'err') }
     finally { releaseProject(id) }
@@ -429,7 +445,7 @@ export default function App() {
                             不再用「命名发布目标」分隔标题，使发布目标整体按工作流顺序呈现。 */}
                         {p.deploy?.method && (
                           <button className="split-item" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', textAlign: 'left', padding: '8px 12px', border: 0, background: 'transparent', cursor: 'pointer', fontSize: 13 }} onClick={() => { setPubMenu(null); triggerAction(p.id, 'pipeline', { method: p.deploy.method }) }}>
-                            <span>{isTriggerBlocked(p.id) ? '触发中…' : '发布到 '}发布到 {METHOD_LABEL[p.deploy.method] || p.deploy.method}</span>
+                            <span>{isTriggerBlocked(p.id) ? '触发中…' : <>发布到 {METHOD_LABEL[p.deploy.method] || p.deploy.method}</>}</span>
                             <span style={{ fontSize: 10, color: 'var(--accent, #2f6fed)', border: '1px solid currentColor', borderRadius: 4, padding: '0 4px', lineHeight: '14px' }}>主</span>
                           </button>
                         )}
