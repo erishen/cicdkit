@@ -188,7 +188,7 @@ export default function App() {
   const [healthCls, setHealthCls] = useState('badge-unknown')
   // 后端构建戳：footer 展示，用于确认浏览器连的是否为最新二进制（修复分页重叠后尤为关键）。
   const [backendStamp, setBackendStamp] = useState('')
-  const [activeTab, setActiveTab] = useState('runs')
+  const [activeTab, setActiveTab] = useState('visits')
   const [visitsRefresh, setVisitsRefresh] = useState(0)
   const [runs, setRuns] = useState([])
   const [deployments, setDeployments] = useState([])
@@ -520,12 +520,12 @@ export default function App() {
 
         <section className="col col-detail">
           <div className="tabs">
+            <button className={'tab ' + (activeTab === 'visits' ? 'active' : '')}
+              onClick={() => setActiveTab('visits')}>访客统计</button>
             <button className={'tab ' + (activeTab === 'runs' ? 'active' : '')}
               onClick={() => setActiveTab('runs')}>运行记录</button>
             <button className={'tab ' + (activeTab === 'deploys' ? 'active' : '')}
               onClick={() => setActiveTab('deploys')}>部署历史</button>
-            <button className={'tab ' + (activeTab === 'visits' ? 'active' : '')}
-              onClick={() => setActiveTab('visits')}>访客统计</button>
           </div>
 
           <div className={'tab-panel ' + (activeTab === 'runs' ? '' : 'hidden')}>

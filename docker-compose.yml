@@ -1,0 +1,62 @@
+# cicdkit 自身作为 OrbStack compose 工程运行
+# 让平台像其它应用一样出现在 OrbStack 的 Docker 视图（compose 工程名 = 目录名 cicdkit）。
+#
+# 设计要点：
+#  - 挂载宿主 /var/run/docker.sock，复用 OrbStack 的 docker daemon
+#    （镜像构建/推送、local-k3s 导入全部走它，无需 Docker-in-Docker）
+#  - 挂载宿主 kubeconfig，entrypoint 把 server 由 127.0.0.1 改写为容器内可达的 host.docker.internal
+#  - 工作区以「相同绝对路径」挂入容器，store.json 里已有的项目构建路径仍然有效
+#  - 容器内服务监听 :8080，发布到宿主 10081（与既有访问地址 http://localhost:10081 保持一致）
+#  - 监听 :8080（非本机回环），按 main.go 安全策略必须提供 API_TOKEN（取自仓库根 .env）
+#  - 运行数据挂在 ./data，与本地 make run 共用同一份 store.json
+#
+# 用法：
+#   docker compose up -d --build     # 首次带 --build 构建镜像
+#   docker compose logs -f cicdkit
+#   open http://localhost:10081      # 浏览器输入仓库根 .env 里的 API_TOKEN
+# 注意：先停掉本机 `make run` 占用的 8080 端口（或既有 10081 反代），避免冲突。
+
+services:
+  cicdkit:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: cicdkit:latest
+    container_name: cicdkit
+    init: true
+    restart: unless-stopped
+    environment:
+      # API_TOKEN 经两道保障注入为「真实环境变量」，绕开 Go LoadDotEnv 对挂载 .env
+      # 文件的干扰（之前把 API_TOKEN 冲掉，导致非回环绑定被安全策略拒绝而崩溃）：
+      #   1) compose 插值：读取同目录 .env 的 API_TOKEN 注入容器环境；
+      #   2) 入口脚本：把 /app/secrets/.env 逐行 export（见 volumes 挂载点）。
+      API_TOKEN: ${API_TOKEN}
+      # 工作区挂载点，作为 UI 目录选择器可见根（需与下面 volumes 的挂载路径一致）
+      CICD_FS_ROOTS: ${WORKSPACE:-/Users/erishen/Workspace/CNB/individular-invest}
+      # 容器内 kubeconfig（由 entrypoint 从宿主 kubeconfig 改写生成）
+      KUBECONFIG: /root/.kube/config
+    # 加载 data-docker 里的 config.json（auto_token/fs_roots/default_kubeconfig），
+    # 同时由 env 覆盖 API_TOKEN / KUBECONFIG / CICD_FS_ROOTS（见 environment）。
+    command: ["-addr", ":8080", "-config", "/app/data/config.json"]
+    ports:
+      - "127.0.0.1:10081:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # .env 故意挂到 /app/secrets/.env（非 Go LoadDotEnv 搜索路径），由入口脚本导出；
+      # 不要挂到 /app/.env，否则 LoadDotEnv 会扫到并把 API_TOKEN 弄丢。
+      - ./.env:/app/secrets/.env:ro
+      - ${HOME}/.kube/config:/mnt/host-kubeconfig/config:ro
+      # 用 data-docker 作为运行数据目录：含真实项目(store.json: lume-crm/tnsbp-lume)、
+      # 配置(config.json)、SSH 密钥(ssh_aliyun_key/ssh_tencent_key)与 kubeconfig，
+      # 部署才能真正跑通；不要用 ./data（那是 hello-* 示例种子数据）。
+      - ./data-docker:/app/data
+      # 工作区：以相同绝对路径挂入，保证既有项目的构建上下文路径有效
+      - ${WORKSPACE:-/Users/erishen/Workspace/CNB/individular-invest}:${WORKSPACE:-/Users/erishen/Workspace/CNB/individular-invest}:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "--noproxy", "*", "http://127.0.0.1:8080/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s

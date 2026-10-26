@@ -89,6 +89,28 @@ curl http://localhost:8080/api/health
 
 ---
 
+## 在 OrbStack / Docker 中运行（推荐）
+
+把 cicdkit 自身也作为容器跑在 OrbStack 里，像其它应用一样出现在 Docker 视图（compose 工程名 = 目录名 `cicdkit`）：
+
+```bash
+# 先停掉本机 make run 占用的 8080 端口
+docker compose up -d --build
+open http://localhost:10081   # 浏览器输入仓库根 .env 里的 API_TOKEN
+```
+
+要点：
+- 挂载宿主 `/var/run/docker.sock`，复用 OrbStack 的 docker daemon（构建/推送、local-k3s 导入都走它，无需 Docker-in-Docker）；
+- 挂载宿主 kubeconfig，容器入口脚本把 `127.0.0.1:26443` 改写成 `host.docker.internal:26443` 以连上 OrbStack 的 k3s；
+- 你的工作区以**相同绝对路径**挂入容器（`CICD_FS_ROOTS` 暴露给 UI 目录选择器），既有项目的构建上下文路径仍然有效；
+- 监听 `:8080` 属于非本机回环，`main.go` 强制要求 `API_TOKEN`（取自仓库根 `.env`），否则拒绝启动；
+- `.env` 故意挂到容器内的 `/app/secrets/.env`（非 Go `LoadDotEnv` 的搜索路径），由入口脚本逐行 `export` 为真实环境变量注入——避免挂载的 `.env` 文件被 `LoadDotEnv` 扫到后把 `API_TOKEN` 冲掉导致回退到 `AUTO_TOKEN` 而崩溃；
+- 运行数据挂在 `./data-docker`（真实项目 `lume-crm` / `tnsbp-lume`、SSH 密钥 `ssh_aliyun_key` / `ssh_tencent_key`、kubeconfig 都在这里）；**不要用 `./data`**，那是 `hello-*` 示例种子数据。
+
+> 镜像构建需拉取 `node:24-alpine` / `golang:1.22-alpine`，首次构建约几分钟。若 kubectl 提示连不上 k3s，把 kubeconfig 的 server 改成 `https://kubernetes.docker.internal:26443` 或宿主 IP 后重启容器即可。
+
+---
+
 ## Configuration
 
 Config precedence: **command-line `-config` file < environment variable overrides**.

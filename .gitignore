@@ -45,3 +45,7 @@ cmd/server/web/dist/
 
 # Go 构建/模块/测试缓存 (沙箱内 GOCACHE/GOMODCACHE/GOPATH 指向本地 .gocache 目录)
 .gocache/
+
+# docker buildx 本地配置（BUILDX_CONFIG 指向此处，规避沙箱 buildx 活动追踪拦截；
+# 含节点/活动元数据，非源码、体积随构建增长，禁止提交）
+.buildx/

@@ -31,8 +31,14 @@ COPY kubectl-linux-arm64 /usr/local/bin/kubectl
 RUN chmod +x /usr/local/bin/kubectl
 WORKDIR /app
 COPY --from=builder /out/server /app/server
+# 容器入口：启动前把宿主 kubeconfig 的 127.0.0.1 改写为容器内可达的 host.docker.internal
+COPY docker-entrypoint.sh /app/docker-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh
 # 运行时数据（store.json）挂到命名卷；docker 构建通过挂载宿主 /var/run/docker.sock 复用宿主 daemon
 VOLUME ["/app/data"]
 EXPOSE 8080
-ENTRYPOINT ["/app/server"]
-CMD ["-addr", ":8080", "-config", "/app/data/config.json"]
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
+# 不传 -config：无 config.json 时服务端回落内置默认值（loopback=false 由 -addr :8080
+# 决定，API_TOKEN 经入口脚本从 /app/secrets/.env export 注入）。store 默认落在 ./data
+# （即挂载的 /app/data），与本地 make run 共用同一份 store.json。
+CMD ["-addr", ":8080"]
