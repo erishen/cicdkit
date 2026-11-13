@@ -114,7 +114,11 @@ var (
 func probeURL(ctx context.Context, method, url string, spec store.ProbeSpec, timeout time.Duration) store.ProbeResult {
 	const (
 		maxTransportRetries = 1 // +1 initial attempt = 2 total (previous behavior)
-		maxHTTP5xxRetries   = 2 // up to ~12s of extra boot tolerance
+		// 5xx(nginx "no live upstreams")在部署后很常见: 远端 docker run 返回时容器
+		// 往往还在 boot(镜像首启 + 应用 startup sync 可达 20-40s), nginx 单上游
+		// 失败后又按 fail_timeout(默认 10s)整段 502。重试窗口必须覆盖这个复合
+		// 窗口, 否则每次发布后探测都赌启动时间(实测 2 次/~12s 不够, 扩到 5 次/~30s)。
+		maxHTTP5xxRetries = 5
 	)
 	var last store.ProbeResult
 	transportTries, http5xxTries := 0, 0
@@ -241,30 +245,30 @@ func parseResponse(method, url string, spec store.ProbeSpec, resp *http.Response
 //  3. Cluster Service derivation for k8s-style methods.
 func resolveURL(ctx context.Context, p store.Project, cfg *config.Config, targetName string) ([]string, string) {
 	method := p.Deploy.Method
-	// A named target with an explicit probe URL (probe.urls[<target>]) always
-	// wins over the derived IP:port.
+	// 1) 命名目标的显式探测地址(probe.urls[<target>])优先级最高。
 	if tn := strings.TrimSpace(targetName); tn != "" {
 		if u := strings.TrimSpace(p.Probe.URLs[tn]); u != "" {
 			return []string{u}, ""
 		}
 	}
-	if method == "ssh" {
-		// ssh 部署没有集群 Service，主机来自目标自身的 deploy.ssh_host
-		// （表单会从 .env 的 CICD_SSH_HOST_<厂商> 预填），所以探针 URL
-		// 其次由 ssh host + 探针端口推导；目标既没配域名 URL 也没配主机
-		// 时才回退到按方法/全局的 URL 覆盖。
-		if urls, _ := deriveFromSSH(p); len(urls) > 0 {
-			return urls, ""
-		}
+	// 2) 显式探测地址优先于任何自动推导: ssh 部署走 nginx 反代时, 服务真实
+	// 入口是公网域名(如 https://xxx.example.com), 而容器端口可能只监听
+	// 127.0.0.1, 探测裸 IP:port 会直接 EOF。probe.url 是全局单一目标,
+	// probe.urls[<method>] 给多目标项目一个按部署方式的粗粒度覆盖。
+	if u := strings.TrimSpace(p.Probe.URL); u != "" {
+		return []string{u}, ""
 	}
 	if u := strings.TrimSpace(p.Probe.URLs[method]); u != "" {
 		return []string{u}, ""
 	}
-	if u := strings.TrimSpace(p.Probe.URL); u != "" {
-		return []string{u}, ""
+	if method == "ssh" {
+		// 3) ssh 部署没有集群 Service, 未显式配置时由 host + 探针端口推导。
+		if urls, _ := deriveFromSSH(p); len(urls) > 0 {
+			return urls, ""
+		}
 	}
 	if method == "ssh" {
-		return nil, "ssh 部署未配置 deploy.ssh_host，无法推导探测地址；请在发布目标里填写主机（.env 的 CICD_SSH_HOST_<厂商> 会在表单预填），或在 probe.urls.ssh 中手动指定地址"
+		return nil, "ssh 部署未配置 deploy.ssh_host，无法推导探测地址；请在发布目标里填写主机（.env 的 CICD_SSH_HOST_<厂商> 会在表单预填），或在 probe.url / probe.urls.ssh 中显式指定地址"
 	}
 	if !needsCluster(method) {
 		return nil, "未配置 probe.url 且部署方式不涉及集群，无法自动推导服务地址（请手动填写 URL，或在 probe.urls 中按部署方式指定）"

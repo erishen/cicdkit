@@ -49,3 +49,8 @@ cmd/server/web/dist/
 # docker buildx 本地配置（BUILDX_CONFIG 指向此处，规避沙箱 buildx 活动追踪拦截；
 # 含节点/活动元数据，非源码、体积随构建增长，禁止提交）
 .buildx/
+
+# Go 工具链本地缓存(沙箱 build/test 重定向到仓库根, 禁止提交)
+.go-cache/
+.go-gopath/
+.go-tmp/

@@ -287,6 +287,46 @@ func TestBackfillRunProbeEscalatesSuccessRunToFailed(t *testing.T) {
 	}
 }
 
+func TestUpdateProjectPreservesLastDeploy(t *testing.T) {
+	st := newTestStore(t)
+	created := time.Now().Add(-time.Hour)
+	old := Project{
+		ID:        "p1",
+		Name:      "old",
+		CreatedAt: created,
+		LastDeploy: &LastDeployInfo{
+			Method:   "ssh",
+			Target:   "腾讯云",
+			ImageRef: "app:old",
+			At:       created.Add(30 * time.Minute),
+		},
+		LastDeploys: map[string]*LastDeployInfo{
+			"腾讯云": {Method: "ssh", Target: "腾讯云", ImageRef: "app:old", At: created.Add(30 * time.Minute)},
+		},
+	}
+	if err := st.CreateProject(old); err != nil {
+		t.Fatalf("创建项目失败: %v", err)
+	}
+
+	// 编辑表单只提交配置，不带 last_deploy/last_deploys；更新后卡片状态不能消失。
+	if err := st.UpdateProject(Project{ID: "p1", Name: "new"}); err != nil {
+		t.Fatalf("更新项目失败: %v", err)
+	}
+	got, ok := st.GetProject("p1")
+	if !ok {
+		t.Fatal("项目应仍存在")
+	}
+	if got.LastDeploy == nil || got.LastDeploy.Target != "腾讯云" || got.LastDeploy.ImageRef != "app:old" {
+		t.Fatalf("更新配置不应清空 LastDeploy: %+v", got.LastDeploy)
+	}
+	if got.LastDeploys == nil || got.LastDeploys["腾讯云"] == nil || got.LastDeploys["腾讯云"].ImageRef != "app:old" {
+		t.Fatalf("更新配置不应清空 LastDeploys: %+v", got.LastDeploys)
+	}
+	if !got.CreatedAt.Equal(created) {
+		t.Fatalf("CreatedAt 应保留，得到 %v", got.CreatedAt)
+	}
+}
+
 func mustSave(t *testing.T, st *jsonStore, r Run) {
 	t.Helper()
 	if err := st.SaveRun(r); err != nil {

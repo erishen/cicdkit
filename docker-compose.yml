@@ -35,6 +35,14 @@ services:
       CICD_FS_ROOTS: ${WORKSPACE:-/Users/erishen/Workspace/CNB/individular-invest}
       # 容器内 kubeconfig（由 entrypoint 从宿主 kubeconfig 改写生成）
       KUBECONFIG: /root/.kube/config
+      # A2A 能力节点面（lume 集群接入）：与 tsm-hub/lume-a2a 共用同一 PEER_ROOT。
+      # registry 指向挂载的 /app/data/peers-identity.json（宿主 data-docker/）。
+      # 未配 PEER_ROOT 时 peer 面 fail-closed 关闭，Agent Card / /a2a 仍开放。
+      CICDKIT_PEER_NAME: cicdkit
+      CICDKIT_PEER_ROOT: ${CICDKIT_PEER_ROOT:-verify-root-2026}
+      CICDKIT_PEER_PEERS: ${CICDKIT_PEER_PEERS:-lume-a2a}
+      CICDKIT_PEER_REGISTRY: /app/data/peers-identity.json
+      CICDKIT_PEER_SKEW: "120"
     # 加载 data-docker 里的 config.json（auto_token/fs_roots/default_kubeconfig），
     # 同时由 env 覆盖 API_TOKEN / KUBECONFIG / CICD_FS_ROOTS（见 environment）。
     command: ["-addr", ":8080", "-config", "/app/data/config.json"]

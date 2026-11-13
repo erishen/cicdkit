@@ -92,6 +92,9 @@ export default function ProjectForm({ project, notes, onSaved, onCancel }) {
     }))
   })
   const [err, setErr] = useState('')
+  // 主发布目标：把「上方发布配置」绑定到某个命名目标，默认发布直接使用该目标。
+  // 绑定后端口/主机等字段双向同步，避免编辑页和部署目标各存一份端口导致漂移。
+  const [primaryTarget, setPrimaryTarget] = useState(() => (project && project.primary_target) || '')
   // Lazily opened "manage deploy targets" modal — keeps the main form short.
   const [showTargets, setShowTargets] = useState(false)
   // Per-vendor SSH hosts from .env (GET /api/config/ssh-defaults → providers),
@@ -100,20 +103,61 @@ export default function ProjectForm({ project, notes, onSaved, onCancel }) {
   useEffect(() => { API.sshDefaults().then(setSshDef).catch(() => {}) }, [])
   // .env 里配的云厂商 IP：CICD_SSH_HOST_<PROVIDER>（providers map）。
   const cloudHost = (v) => (sshDef && sshDef.providers && sshDef.providers[v]) || ''
+  // Apply a cloud preset to either the top deploy form or a named target. Used
+  // by both editors so a bound primary target and the top mirror stay identical.
+  const withCloudPreset = (base, preset, v) => {
+    const next = { ...base, cloud_provider: v }
+    if (preset) {
+      next.ssh_host = base.ssh_host ? base.ssh_host : cloudHost(v)
+      next.ssh_port = preset.port || base.ssh_port
+      next.ssh_user = preset.user || base.ssh_user
+      next.ssh_probe_port = preset.probe_port || base.ssh_probe_port
+    }
+    return next
+  }
 
   // True when this is a scanned draft whose context still needs the absolute path.
   const ctxMissing = !!project && !form.context.trim()
+
+  // Deploy fields shared by the primary form and a named target. When a
+  // primary target is bound, edits on either side must update both so the
+  // host/probe ports shown above never drift from the target they represent.
+  const DEPLOY_FIELDS = [
+    'method', 'kubeconfig', 'namespace', 'manifest_path', 'deployment', 'container',
+    'chart_path', 'release_name', 'helm_image_key', 'helm_set_image', 'k3s_import_cmd',
+    'ssh_host', 'ssh_user', 'ssh_port', 'ssh_key_path', 'ssh_image', 'ssh_container',
+    'ssh_run_args', 'ssh_probe_port', 'ssh_container_port', 'ssh_pull', 'ssh_transfer',
+    'cloud_provider',
+  ]
+  const targetDeployFields = (t) => {
+    const out = {}
+    DEPLOY_FIELDS.forEach((k) => { out[k] = t[k] })
+    return out
+  }
+  const syncFormFromTarget = (t) => setForm((f) => ({ ...f, ...targetDeployFields(t) }))
 
   const set = (k) => (e) => {
     const t = e.target
     const v = t.type === 'checkbox' ? t.checked : t.value
     setForm((f) => ({ ...f, [k]: v }))
+    // Bound primary target: keep the target's connected fields in lockstep.
+    if (primaryTarget && DEPLOY_FIELDS.includes(k)) {
+      setTargets((ts) => ts.map((x) => (x.name === primaryTarget ? { ...x, [k]: v } : x)))
+    }
   }
 
   // Per-target editors operate on the `targets` array (indexed).
   const updateTarget = (i, k) => (e) => {
     const v = e.target.type === 'checkbox' ? e.target.checked : e.target.value
-    setTargets((ts) => ts.map((t, j) => (j === i ? { ...t, [k]: v } : t)))
+    const old = targets[i]
+    const next = targets.map((t, j) => (j === i ? { ...t, [k]: v } : t))
+    setTargets(next)
+    // Bound primary target: editing its fields (including its name) mirrors
+    // the same values into the top deploy form and keeps the binding name.
+    if (primaryTarget && old && old.name === primaryTarget) {
+      if (k === 'name') setPrimaryTarget(v)
+      syncFormFromTarget(next[i])
+    }
   }
   const addTarget = () => setTargets((ts) => [...ts, {
     name: '', note: '', method: 'ssh', cloud_provider: 'custom',
@@ -122,7 +166,11 @@ export default function ProjectForm({ project, notes, onSaved, onCancel }) {
     kubeconfig: '', namespace: '', manifest_path: '', deployment: '', container: '',
     chart_path: '', release_name: '', helm_image_key: '', helm_set_image: false, k3s_import_cmd: '',
   }])
-  const removeTarget = (i) => setTargets((ts) => ts.filter((_, j) => j !== i))
+  const removeTarget = (i) => {
+    const removed = targets[i]
+    if (primaryTarget && removed && removed.name === primaryTarget) setPrimaryTarget('')
+    setTargets((ts) => ts.filter((_, j) => j !== i))
+  }
   // 打开项目时若尚无发布目标，直接把 .env 里配置的腾讯云（CICD_SSH_*）写成一个
   // 「腾讯云」目标，无需任何「导入」按钮——用户开「管理发布目标」就能看到它并已预填，
   // 可继续改。值来自后端 GET /api/config/ssh-defaults（即 .env），保证与配置同步。
@@ -155,6 +203,67 @@ export default function ProjectForm({ project, notes, onSaved, onCancel }) {
       setErr('请填写构建上下文路径（用浏览器目录选择器时无法自动获取真实路径，需填服务器可访问的绝对路径，如 /Users/you/code/hello-node）')
       return
     }
+    const targetPayloads = targets
+      .filter((t) => t.name.trim())
+      .map((t) => ({
+        name: t.name.trim(),
+        note: t.note.trim(),
+        method: t.method,
+        kubeconfig: t.kubeconfig.trim(),
+        namespace: t.namespace.trim(),
+        manifest_path: t.manifest_path.trim(),
+        deployment: t.deployment.trim(),
+        container: t.container.trim(),
+        chart_path: t.chart_path.trim(),
+        release_name: t.release_name.trim(),
+        helm_image_key: t.helm_image_key.trim(),
+        helm_set_image: t.helm_set_image,
+        k3s_import_cmd: t.k3s_import_cmd.trim(),
+        ssh_host: t.ssh_host.trim(),
+        ssh_user: t.ssh_user.trim(),
+        ssh_port: t.ssh_port.trim(),
+        ssh_key_path: t.ssh_key_path.trim(),
+        ssh_image: t.ssh_image.trim(),
+        ssh_container: t.ssh_container.trim(),
+        ssh_run_args: t.ssh_run_args.trim(),
+        ssh_probe_port: t.ssh_probe_port.trim(),
+        ssh_container_port: t.ssh_container_port.trim(),
+        ssh_pull: t.ssh_pull,
+        ssh_transfer: t.ssh_transfer,
+      }))
+    // 绑定主目标时，顶层 deploy 由目标派生，避免“编辑区端口”和“目标端口”再次分叉。
+    const bound = targetPayloads.find((t) => t.name === primaryTarget.trim())
+    const baseDeploy = {
+      method: form.method,
+      kubeconfig: form.kubeconfig.trim(),
+      namespace: form.namespace.trim(),
+      manifest_path: form.manifest_path.trim(),
+      deployment: form.deployment.trim(),
+      container: form.container.trim(),
+      chart_path: form.chart_path.trim(),
+      release_name: form.release_name.trim(),
+      helm_image_key: form.helm_image_key.trim(),
+      helm_set_image: form.helm_set_image,
+      k3s_import_cmd: form.k3s_import_cmd.trim(),
+      ssh_host: form.ssh_host.trim(),
+      ssh_user: form.ssh_user.trim(),
+      ssh_port: form.ssh_port.trim(),
+      ssh_key_path: form.ssh_key_path.trim(),
+      ssh_image: form.ssh_image.trim(),
+      ssh_container: form.ssh_container.trim(),
+      ssh_run_args: form.ssh_run_args.trim(),
+      ssh_probe_port: form.ssh_probe_port.trim(),
+      ssh_container_port: form.ssh_container_port.trim(),
+      ssh_pull: form.ssh_pull,
+      ssh_transfer: form.ssh_transfer,
+      wait: form.wait,
+      timeout: form.timeout.trim(),
+    }
+    let boundDeploy = null
+    if (bound) {
+      const { name, note, ...rest } = bound
+      boundDeploy = { ...rest, wait: form.wait, timeout: form.timeout.trim() }
+    }
     const payload = {
       name: form.name.trim(),
       description: form.description.trim(),
@@ -168,32 +277,7 @@ export default function ProjectForm({ project, notes, onSaved, onCancel }) {
         push: form.push,
         build_args: parseKV(form.build_args),
       },
-      deploy: {
-        method: form.method,
-        kubeconfig: form.kubeconfig.trim(),
-        namespace: form.namespace.trim(),
-        manifest_path: form.manifest_path.trim(),
-        deployment: form.deployment.trim(),
-        container: form.container.trim(),
-        chart_path: form.chart_path.trim(),
-        release_name: form.release_name.trim(),
-        helm_image_key: form.helm_image_key.trim(),
-        helm_set_image: form.helm_set_image,
-        k3s_import_cmd: form.k3s_import_cmd.trim(),
-        ssh_host: form.ssh_host.trim(),
-        ssh_user: form.ssh_user.trim(),
-        ssh_port: form.ssh_port.trim(),
-        ssh_key_path: form.ssh_key_path.trim(),
-        ssh_image: form.ssh_image.trim(),
-        ssh_container: form.ssh_container.trim(),
-        ssh_run_args: form.ssh_run_args.trim(),
-        ssh_probe_port: form.ssh_probe_port.trim(),
-        ssh_container_port: form.ssh_container_port.trim(),
-        ssh_pull: form.ssh_pull,
-        ssh_transfer: form.ssh_transfer,
-        wait: form.wait,
-        timeout: form.timeout.trim(),
-      },
+      deploy: boundDeploy || baseDeploy,
       probe: {
         enabled: form.probe_enabled,
         method: form.probe_method,
@@ -207,34 +291,8 @@ export default function ProjectForm({ project, notes, onSaved, onCancel }) {
         body_contains: form.probe_body_contains.trim(),
         timeout: form.probe_timeout.trim(),
       },
-      targets: targets
-        .filter((t) => t.name.trim())
-        .map((t) => ({
-          name: t.name.trim(),
-          note: t.note.trim(),
-          method: t.method,
-          kubeconfig: t.kubeconfig.trim(),
-          namespace: t.namespace.trim(),
-          manifest_path: t.manifest_path.trim(),
-          deployment: t.deployment.trim(),
-          container: t.container.trim(),
-          chart_path: t.chart_path.trim(),
-          release_name: t.release_name.trim(),
-          helm_image_key: t.helm_image_key.trim(),
-          helm_set_image: t.helm_set_image,
-          k3s_import_cmd: t.k3s_import_cmd.trim(),
-          ssh_host: t.ssh_host.trim(),
-          ssh_user: t.ssh_user.trim(),
-          ssh_port: t.ssh_port.trim(),
-          ssh_key_path: t.ssh_key_path.trim(),
-          ssh_image: t.ssh_image.trim(),
-          ssh_container: t.ssh_container.trim(),
-          ssh_run_args: t.ssh_run_args.trim(),
-          ssh_probe_port: t.ssh_probe_port.trim(),
-          ssh_container_port: t.ssh_container_port.trim(),
-          ssh_pull: t.ssh_pull,
-          ssh_transfer: t.ssh_transfer,
-        })),
+      targets: targetPayloads,
+      primary_target: bound ? bound.name : '',
     }
     if (!payload.name) { setErr('请填写名称'); return }
     try {
@@ -355,17 +413,10 @@ export default function ProjectForm({ project, notes, onSaved, onCancel }) {
                         value={form.cloud_provider || 'custom'}
                         onChange={(e) => {
                           const v = e.target.value
-                          set('cloud_provider')(e)
                           const preset = CLOUD_PRESETS[v]
-                          if (preset) {
-                            setForm((f) => ({
-                              ...f,
-                              // .env 配过该厂商 IP（CICD_SSH_HOST_*）且主机为空时才预填，不覆盖手填值
-                              ssh_host: f.ssh_host ? f.ssh_host : cloudHost(v),
-                              ssh_port: preset.port || f.ssh_port,
-                              ssh_user: preset.user || f.ssh_user,
-                              ssh_probe_port: preset.probe_port || f.ssh_probe_port,
-                            }))
+                          setForm((f) => withCloudPreset(f, preset, v))
+                          if (primaryTarget) {
+                            setTargets((ts) => ts.map((t) => (t.name === primaryTarget ? withCloudPreset(t, preset, v) : t)))
                           }
                         }}
                       >
@@ -409,8 +460,31 @@ export default function ProjectForm({ project, notes, onSaved, onCancel }) {
             <fieldset>
               <legend>发布目标（可选）</legend>
               <p className="muted" style={{ fontSize: 12, lineHeight: 1.5 }}>
-                上方「发布」区即默认单目标配置。需要把同一份代码发到多台主机/云时（如「腾讯云-prod」「AWS-staging」），点下方按钮管理命名发布目标，每个目标自带完整发布配置，保存后在卡片「发布 ▾」下拉里选对应目标即可。
+                上方「发布」区是默认单目标配置。需要把同一份代码发到多台主机/云时，管理命名发布目标并在卡片「发布 ▾」里选择。
+                选择「主发布目标」后，上方发布配置与该目标双向同步，端口/主机以目标为准，不会再出现编辑区 18793、目标 8096 这种分叉。
               </p>
+              <label>主发布目标（默认「发布 ▾」第一项）
+                <select
+                  className="input"
+                  value={primaryTarget}
+                  onChange={(e) => {
+                    const v = e.target.value
+                    setPrimaryTarget(v)
+                    const t = targets.find((x) => x.name === v)
+                    if (t) syncFormFromTarget(t)
+                  }}
+                >
+                  <option value="">不绑定；使用上方主配置</option>
+                  {targets.filter((t) => t.name.trim()).map((t) => (
+                    <option key={t.name} value={t.name}>{t.name}</option>
+                  ))}
+                </select>
+              </label>
+              {primaryTarget && (
+                <p className="muted" style={{ fontSize: 12, color: 'var(--warning, #b45309)' }}>
+                  当前主发布配置绑定「{primaryTarget}」；编辑它时端口等字段会同步到上方。
+                </p>
+              )}
               <div className="targets-bar">
                 <span className="muted" style={{ fontSize: 13 }}>
                   {targets.length > 0
@@ -488,6 +562,7 @@ export default function ProjectForm({ project, notes, onSaved, onCancel }) {
                 <div className="target-card" key={i}>
                   <div className="target-head">
                     <strong>目标 {i + 1}</strong>
+                    {primaryTarget && t.name === primaryTarget && <span className="badge badge-ok">主</span>}
                     <button type="button" className="btn btn-ghost btn-sm" onClick={() => removeTarget(i)}>✕ 删除</button>
                   </div>
                   <label>名称 <input className="input" placeholder="如 腾讯云-prod" value={t.name} onChange={updateTarget(i, 'name')} /></label>
@@ -508,15 +583,11 @@ export default function ProjectForm({ project, notes, onSaved, onCancel }) {
                           value={t.cloud_provider || 'custom'}
                           onChange={(e) => {
                             const v = e.target.value
-                            updateTarget(i, 'cloud_provider')(e)
                             const preset = CLOUD_PRESETS[v]
-                            if (preset) {
-                              setTargets((ts) => ts.map((x, j) => j === i
-                                ? { ...x,
-                                    // .env 配过该厂商 IP 且主机为空时才预填，不覆盖手填值
-                                    ssh_host: x.ssh_host ? x.ssh_host : cloudHost(v),
-                                    ssh_port: preset.port || x.ssh_port, ssh_user: preset.user || x.ssh_user, ssh_probe_port: preset.probe_port || x.ssh_probe_port }
-                                : x))
+                            const next = targets.map((x, j) => (j === i ? withCloudPreset(x, preset, v) : x))
+                            setTargets(next)
+                            if (primaryTarget && targets[i] && targets[i].name === primaryTarget) {
+                              syncFormFromTarget(next[i])
                             }
                           }}
                         >

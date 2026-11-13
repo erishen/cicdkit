@@ -244,20 +244,22 @@ func TestResolveURLPerMethodOverrideFallback(t *testing.T) {
 	}
 }
 
-func TestResolveURLSSHTargetHostBeatsPerMethodOverride(t *testing.T) {
-	// 当目标 deploy.ssh_host 与 urls.ssh 同时存在时，应优先使用目标主机
-	// 推导的地址；urls.ssh 仅作兜底。
+func TestResolveURLPerMethodOverrideBeatsSSHDerive(t *testing.T) {
+	// 当方法级覆盖 urls.ssh 与目标 deploy.ssh_host 同时存在时, urls.ssh 优先
+	// (显式配置赢过自动推导); 目标主机推导仅作兜底。
+	// 背景: 容器端口可能只绑 127.0.0.1, 裸 IP:port 公网打不到, 显式配置的
+	// 域名/地址才可用 —— 推导地址不应压过显式配置。
 	p := store.Project{
 		Name:   "demo",
 		Deploy: store.DeploySpec{Method: "ssh", SSHHost: "203.0.113.10"},
 		Probe:  store.ProbeSpec{Enabled: true, URLs: map[string]string{"ssh": "http://1.2.3.4:8080"}},
 	}
 	urls, note := resolveURL(context.Background(), p, &config.Config{}, "")
-	if len(urls) != 1 || urls[0] != "http://203.0.113.10:8080" {
-		t.Fatalf("ssh 应优先使用目标 ssh_host 推导的地址，得到 %v (note=%q)", urls, note)
+	if len(urls) != 1 || urls[0] != "http://1.2.3.4:8080" {
+		t.Fatalf("ssh 方法级显式 URL 应优先于目标主机推导，得到 %v (note=%q)", urls, note)
 	}
 	if note != "" {
-		t.Fatalf("命中目标主机推导地址时不应有说明，得到 %q", note)
+		t.Fatalf("命中显式方法级 URL 时不应有说明，得到 %q", note)
 	}
 }
 

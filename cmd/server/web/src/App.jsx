@@ -144,7 +144,7 @@ function VisitsBlock({ project, refreshKey }) {
           <ul>
             {(v.recent || []).map((r, i) => (
               <li key={i} title={r.ua || ''}>
-                <span className="visits-ip">{r.ip || '?'}</span>
+                <span className="visits-ip">{r.ip || '—'}</span>
                 <span className="visits-path">{r.path || ''}</span>
                 {r.referrer && <span className="visits-ref">{r.referrer}</span>}
                 <span className="visits-time">{r.t ? r.t.slice(11, 16) : ''}</span>
@@ -445,12 +445,23 @@ export default function App() {
                     return <span className="badge badge-queue">未探测</span>
                   }
                   // 备注里的域名/URL 自动链接化，其余文字原样展示（如「公网域名 lume-crm.erishen.cn」）。
+                  // 逐个匹配而不是只取第一个：备注里常同时写主机名和带端口的访问 URL，
+                  // 只链接第一个会让后面的 8080/8096 地址丢掉链接。
                   const renderNote = (note) => {
-                    const m = note.match(/(https?:\/\/[^\s]+)|([a-zA-Z0-9-]+(\.[a-zA-Z0-9-]+)+)/)
-                    if (!m) return note
-                    const tok = m[0]
-                    const url = tok.startsWith('http') ? tok : 'https://' + tok
-                    return <>{note.slice(0, m.index)}<a className="deploy-link" href={url} target="_blank" rel="noreferrer">{tok}</a>{note.slice(m.index + tok.length)}</>
+                    const re = /(https?:\/\/[^\s；，,。]+)|([a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)+(?::\d+)?)/g
+                    const parts = []
+                    let last = 0
+                    let m
+                    while ((m = re.exec(note)) !== null) {
+                      const tok = m[0]
+                      const url = /^https?:\/\//.test(tok) ? tok : 'https://' + tok
+                      parts.push(note.slice(last, m.index))
+                      parts.push(<a key={`${m.index}-${tok}`} className="deploy-link" href={url} target="_blank" rel="noreferrer">{tok}</a>)
+                      last = m.index + tok.length
+                    }
+                    if (parts.length === 0) return note
+                    parts.push(note.slice(last))
+                    return parts
                   }
                   return (
                     <div className="last-deploy-grid">

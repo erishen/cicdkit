@@ -8,9 +8,12 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/erishen/cicdkit/internal/a2a"
 	"github.com/erishen/cicdkit/internal/config"
 	"github.com/erishen/cicdkit/internal/kb"
 	"github.com/erishen/cicdkit/internal/llm"
@@ -39,6 +42,9 @@ type Server struct {
 	// It is the ONLY token we ever inject into the served UI; an explicitly
 	// configured API_TOKEN is never exposed to the page.
 	autoToken string
+	// A2A 能力节点面（对 lume 集群）。可选：未配 CICDKIT_PEER_* 时 PEER=nil，
+	// peer 面 fail-closed 关闭，但 Agent Card / A2A JSON-RPC 仍开放（与 tsm-hub 一致）。
+	a2a *a2a.Server
 }
 
 // New constructs the server. webFS is the (sub) filesystem rooted at the web
@@ -59,6 +65,10 @@ func New(cfg *config.Config, st store.Store, runner *pipeline.Runner, webFS fs.F
 		}
 	}
 	s := &Server{cfg: cfg, store: st, runner: runner, mux: http.NewServeMux(), llm: llmCfg, llmPath: llmPath, kb: kbCfg, kbPath: kbPath, webFS: webFS, autoToken: autoToken}
+
+	// A2A 能力节点面（对 lume 集群）：可选，未配 CICDKIT_PEER_* 时 peer 面关闭。
+	s.a2a = newA2AServer(cfg, st, kbCfg)
+
 	s.routes(webFS)
 	return s
 }
@@ -149,6 +159,16 @@ func (s *Server) routes(webFS fs.FS) {
 	s.mux.HandleFunc("/api/kb", s.handleKBList)
 	s.mux.HandleFunc("/api/kb/", s.handleKBItem)
 	s.mux.HandleFunc("/api/webhook/", s.handleWebhook)
+	// A2A 能力节点面（对 lume 集群）。Agent Card 公开未认证（发现端点）；
+	// /a2a JSON-RPC 与 peer 签名面走 CICDKIT_PEER_* 白名单（未配则 fail-closed）。
+	if s.a2a != nil {
+		s.mux.HandleFunc("/.well-known/agent-card.json", s.a2a.HandleAgentCard)
+		s.mux.HandleFunc("/a2a", s.a2a.HandleA2A)
+		s.mux.HandleFunc("/peer/health", s.a2a.HandlePeerHealth)
+		s.mux.HandleFunc("/peer/tools", s.a2a.HandlePeerTools)
+		s.mux.HandleFunc("/peer/invoke", s.a2a.HandlePeerInvoke)
+		s.mux.HandleFunc("/peer/relay", s.a2a.HandlePeerRelay)
+	}
 	s.mux.Handle("/", s.serveApp())
 }
 
@@ -270,6 +290,75 @@ func writeJSON(w http.ResponseWriter, code int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(code)
 	_ = encodeJSON(w, v)
+}
+
+// ── A2A 能力节点面 ───────────────────────────────────────────────────
+
+// newA2AServer 纯 env 驱动（CICDKIT_PEER_NAME/ROOT/REGISTRY/SKEW），
+// 未配凭据时 PEER=nil（peer 面 fail-closed 关闭），但 Agent Card + /a2a
+// JSON-RPC 仍开放（与 tsm-hub 一致）。能力数据源走 store + kb 只读面。
+func newA2AServer(cfg *config.Config, st store.Store, kbCfg *kb.KB) *a2a.Server {
+	peerName := envOr("CICDKIT_PEER_NAME", "cicdkit")
+	shared := os.Getenv("CICDKIT_PEER_SHARED")
+	root := os.Getenv("CICDKIT_PEER_ROOT")
+	registry := os.Getenv("CICDKIT_PEER_REGISTRY")
+	if registry == "" {
+		registry = filepath.Join(cfg.DataDir, "peers-identity.json")
+	}
+	skew := 120
+	if v := os.Getenv("CICDKIT_PEER_SKEW"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			skew = n
+		}
+	}
+	// Peer 面：配了 root 或 shared 才启用，否则 nil（整面关闭）。
+	var peer *a2a.Peer
+	if root != "" || shared != "" {
+		peer = a2a.New(peerName, shared, root, registry, skew)
+		// 首次部署自动写注册表（幂等：已存在不覆盖）。
+		if _, err := a2a.WriteRegistry(registry, lumePeersFromEnv()); err != nil {
+			log.Printf("a2a: 写 peer 注册表失败(忽略): %v", err)
+		}
+	}
+
+	caps := a2a.NewCapabilities()
+	a2a.RegisterCICDCapabilities(caps, a2a.Deps{Store: st, KB: kbCfg})
+
+	startTime := time.Now()
+	return &a2a.Server{
+		Node:  peerName,
+		Caps:  caps,
+		Tasks: a2a.NewTaskStore(cfg.DataDir, peerName),
+		PEER:  peer,
+		Uptime: func() time.Duration { return time.Since(startTime) },
+	}
+}
+
+// envOr 取环境变量，空则给默认。
+func envOr(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
+
+// lumePeersFromEnv 读 CICDKIT_PEER_PEERS（逗号分隔）作为注册表默认节点清单。
+// 常见值：lume-a2a,crm,scanner,tsm-hub。
+func lumePeersFromEnv() []string {
+	v := os.Getenv("CICDKIT_PEER_PEERS")
+	if v == "" {
+		return []string{"lume-a2a"}
+	}
+	var out []string
+	for _, p := range strings.Split(v, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	if len(out) == 0 {
+		out = []string{"lume-a2a"}
+	}
+	return out
 }
 
 func writeError(w http.ResponseWriter, code int, msg string) {

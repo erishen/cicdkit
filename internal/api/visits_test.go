@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/erishen/cicdkit/internal/store"
 )
 
 func newVisitsClient() *http.Client {
@@ -57,6 +59,51 @@ func TestFetchVisitsUpstream5xx(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "nginx") {
 		t.Fatalf("error 应提示 nginx 反代故障，得到 %q", err.Error())
+	}
+}
+
+// TestVisitsEndpointStopsAtFullWidthPunctuation: notes commonly use Chinese
+// punctuation without spaces ("公网域名 x.cn；https://x.cn/"). The domain regex
+// must stop at the full-width semicolon instead of swallowing the rest of the
+// note into the host.
+func TestVisitsEndpointStopsAtFullWidthPunctuation(t *testing.T) {
+	p := store.Project{
+		Targets: []store.DeployTarget{{
+			Name: "阿里云",
+			Note: "lume-showcase 公网展示；公网域名 lume.erishen.cn；https://lume.erishen.cn/；registry-free",
+			DeploySpec: store.DeploySpec{
+				SSHRunArgs: "-e LUME_SHOWCASE_VISIT_PIN=pin123",
+			},
+		}},
+	}
+	url, pin := visitsEndpoint(p)
+	if url != "https://lume.erishen.cn" {
+		t.Fatalf("url 应只取域名，得到 %q", url)
+	}
+	if pin != "pin123" {
+		t.Fatalf("pin 应 pin123，得到 %q", pin)
+	}
+}
+
+// TestFetchVisitsUpstreamError200: standalone lume-core cannot set HTTP status
+// on custom routes, so a PIN rejection arrives as 200 + {"status":403,"error":...}.
+// fetchVisits must treat it as a failure instead of marking the block online.
+func TestFetchVisitsUpstreamError200(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"status":403,"error":"forbidden"}`))
+	}))
+	defer backend.Close()
+
+	out, err := fetchVisits(newVisitsClient(), backend.URL, "pinabc")
+	if out != nil {
+		t.Fatalf("业务错误应返回 nil 载荷，得到 %v", out)
+	}
+	if err == nil {
+		t.Fatalf("业务错误应返回 error")
+	}
+	if !strings.Contains(err.Error(), "forbidden") {
+		t.Fatalf("error 应含上游错误文案，得到 %q", err.Error())
 	}
 }
 

@@ -153,6 +153,12 @@ func (p Project) Validate(workDir string) error {
 			}
 		}
 	}
+	// A bound primary target must exist. The edit form mirrors its host/port
+	// fields into the top-level Deploy for display, so a dangling name would
+	// silently publish to the stale top-level copy.
+	if primary := strings.TrimSpace(p.PrimaryTarget); primary != "" && !seen[primary] {
+		return fmt.Errorf("主发布目标 %q 不存在", primary)
+	}
 	return nil
 }
 
@@ -160,22 +166,47 @@ func (p Project) Validate(workDir string) error {
 //
 //   - If targetName is non-empty it must match a named DeployTarget; that
 //     target's full DeploySpec is returned (the run is published to that target).
+//   - Otherwise, if PrimaryTarget names one of the targets, that target's full
+//     DeploySpec is used as the default destination. This keeps the edit form's
+//     primary deploy fields (host/port/container) tied to the target they
+//     represent instead of maintaining a second drifting copy.
 //   - Otherwise the project's primary Deploy is used, with an optional per-run
 //     method override applied (the legacy "publish to a different method" flow).
 //
-// An empty targetName with an empty methodOverride returns the primary spec
-// unchanged. A non-empty targetName that matches nothing is an error so the
-// caller fails the run loudly instead of silently deploying the wrong target.
+// An empty targetName with an empty methodOverride returns the resolved default
+// spec. A named target (explicit or PrimaryTarget) that matches nothing is an
+// error so the caller fails the run loudly instead of silently deploying the
+// wrong target.
 func (p Project) ResolveDeploySpec(targetName, methodOverride string) (DeploySpec, error) {
+	// An explicit per-run target always wins.
 	if strings.TrimSpace(targetName) != "" {
 		for _, t := range p.Targets {
 			if t.Name == targetName {
-				return t.DeploySpec, nil
+				spec := t.DeploySpec
+				if strings.TrimSpace(methodOverride) != "" {
+					spec.Method = methodOverride
+				}
+				return spec, nil
 			}
 		}
 		return DeploySpec{}, fmt.Errorf("未找到发布目标 %q", targetName)
 	}
+
+	// No explicit target: a bound PrimaryTarget is the default destination.
 	spec := p.Deploy
+	if primary := strings.TrimSpace(p.PrimaryTarget); primary != "" {
+		found := false
+		for _, t := range p.Targets {
+			if t.Name == primary {
+				spec = t.DeploySpec
+				found = true
+				break
+			}
+		}
+		if !found {
+			return DeploySpec{}, fmt.Errorf("主发布目标 %q 不存在", primary)
+		}
+	}
 	if strings.TrimSpace(methodOverride) != "" {
 		spec.Method = methodOverride
 	}

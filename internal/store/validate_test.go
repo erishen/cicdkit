@@ -234,6 +234,63 @@ func TestResolveDeploySpec(t *testing.T) {
 	}
 }
 
+// TestResolveDeploySpecPrimaryTarget 验证主发布目标绑定：
+// 未显式指定 targetName 时，PrimaryTarget 命中的目标配置优先于顶层 Deploy；
+// 绑定的目标不存在时必须报错，不能静默回退到旧配置。
+func TestResolveDeploySpecPrimaryTarget(t *testing.T) {
+	p := Project{
+		Name:          "app",
+		PrimaryTarget: "阿里云",
+		Deploy:        DeploySpec{Method: "local-k3s", Namespace: "stale-primary"},
+		Targets: []DeployTarget{
+			{Name: "阿里云", DeploySpec: DeploySpec{Method: "ssh", SSHHost: "47.101.189.64", SSHUser: "root", SSHProbePort: "8096", SSHContainerPort: "18793"}},
+			{Name: "腾讯云", DeploySpec: DeploySpec{Method: "ssh", SSHHost: "118.89.80.229", SSHUser: "root", SSHProbePort: "8080", SSHContainerPort: "18793"}},
+		},
+	}
+
+	spec, err := p.ResolveDeploySpec("", "")
+	if err != nil {
+		t.Fatalf("主发布目标应解析到阿里云: %v", err)
+	}
+	if spec.Method != "ssh" || spec.SSHHost != "47.101.189.64" || spec.SSHProbePort != "8096" || spec.SSHContainerPort != "18793" {
+		t.Fatalf("主发布目标配置错误: %+v", spec)
+	}
+
+	// method 覆盖仍应保留绑定目标的连接/端口，仅替换 method。
+	spec, err = p.ResolveDeploySpec("", "ssh")
+	if err != nil || spec.SSHHost != "47.101.189.64" || spec.SSHProbePort != "8096" {
+		t.Fatalf("method 覆盖破坏了主目标配置: %+v err=%v", spec, err)
+	}
+
+	// 显式 targetName 依然优先于 PrimaryTarget。
+	spec, err = p.ResolveDeploySpec("腾讯云", "")
+	if err != nil || spec.SSHHost != "118.89.80.229" {
+		t.Fatalf("显式目标应优先: %+v err=%v", spec, err)
+	}
+
+	p.PrimaryTarget = "不存在"
+	if _, err := p.ResolveDeploySpec("", ""); err == nil {
+		t.Fatal("PrimaryTarget 不存在时应报错")
+	}
+}
+
+func TestValidatePrimaryTargetMustExist(t *testing.T) {
+	p := Project{
+		Name:          "app",
+		PrimaryTarget: "不存在",
+		Deploy:        DeploySpec{Method: "ssh", SSHHost: "1.2.3.4", SSHUser: "root"},
+		Targets:       []DeployTarget{{Name: "阿里云", DeploySpec: DeploySpec{Method: "ssh", SSHHost: "5.6.7.8", SSHUser: "root"}}},
+	}
+	if err := p.Validate(""); err == nil {
+		t.Fatal("PrimaryTarget 指向不存在的目标时应校验失败")
+	}
+
+	p.PrimaryTarget = "阿里云"
+	if err := p.Validate(""); err != nil {
+		t.Fatalf("存在的主目标应校验通过: %v", err)
+	}
+}
+
 // TestValidateSSHRejectsShellMetachars 覆盖远端命令注入的剩余向量：
 // 之前的检查只拦了 |;&$`>< 和换行，漏掉了 ssh_image、以及可跳出单/双引号
 // 的 " ' ( ) { } \ 与以 - 开头的容器名。

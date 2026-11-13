@@ -382,6 +382,12 @@ func (s *jsonStore) UpdateProject(p Project) error {
 	for i, e := range s.projects {
 		if e.ID == p.ID {
 			p.CreatedAt = e.CreatedAt
+			// LastDeploy/LastDeploys are derived from the deployment history and
+			// are not part of the editable project payload. The edit form PUTs a
+			// config-only object, so preserve the existing snapshots instead of
+			// wiping the card's deployment status on every settings change.
+			p.LastDeploy = e.LastDeploy
+			p.LastDeploys = e.LastDeploys
 			s.projects[i] = p
 			s.persist()
 			return nil

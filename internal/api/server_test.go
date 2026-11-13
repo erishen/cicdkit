@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/erishen/cicdkit/internal/config"
 	"github.com/erishen/cicdkit/internal/pipeline"
@@ -308,9 +309,74 @@ func TestProbeEndpoint(t *testing.T) {
 		t.Fatalf("body_contains 应匹配")
 	}
 
+	// 主发布目标绑定时，不带 target 的手动探测也应使用该目标的 probe.urls。
+	primary := `{"name":"demo-primary","build":{"image_repo":"demo2"},"deploy":{"method":"local-k3s","deployment":"d","container":"c"},"targets":[{"name":"阿里云","method":"local-k3s","deployment":"d2","container":"c2"}],"primary_target":"阿里云","probe":{"enabled":true,"urls":{"阿里云":"` + backend.URL + `"}}}`
+	create2 := do(t, srv, http.MethodPost, "/api/projects", primary, nil)
+	if create2.Code != http.StatusCreated {
+		t.Fatalf("创建主目标项目应 201，得到 %d: %s", create2.Code, create2.Body.String())
+	}
+	var created2 store.Project
+	if err := json.Unmarshal(create2.Body.Bytes(), &created2); err != nil {
+		t.Fatalf("解析主目标项目失败: %v / %s", err, create2.Body.String())
+	}
+	w2 := do(t, srv, http.MethodPost, "/api/projects/"+created2.ID+"/probe", `{}`, nil)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("主目标探测应 200，得到 %d: %s", w2.Code, w2.Body.String())
+	}
+	var res2 store.ProbeResult
+	if err := json.Unmarshal(w2.Body.Bytes(), &res2); err != nil {
+		t.Fatalf("解析主目标探测响应失败: %v / %s", err, w2.Body.String())
+	}
+	if res2.Status != "ok" || res2.URL != backend.URL {
+		t.Fatalf("主目标探测应使用 probe.urls[阿里云]，得到 %s (%s)", res2.Status, res2.URL)
+	}
+
 	// 未知项目应 404
 	if nf := do(t, srv, http.MethodPost, "/api/projects/nope/probe", `{}`, nil); nf.Code != http.StatusNotFound {
 		t.Fatalf("未知项目探测应 404，得到 %d", nf.Code)
+	}
+}
+
+func TestUpdateProjectResponseKeepsDeployStatus(t *testing.T) {
+	srv, st := newTestServer(t, "")
+	payload := `{"name":"demo","build":{"image_repo":"demo"},"deploy":{"method":"local-k3s","deployment":"d","container":"c"}}`
+	create := do(t, srv, http.MethodPost, "/api/projects", payload, nil)
+	if create.Code != http.StatusCreated {
+		t.Fatalf("创建项目应 201，得到 %d: %s", create.Code, create.Body.String())
+	}
+	var created store.Project
+	if err := json.Unmarshal(create.Body.Bytes(), &created); err != nil {
+		t.Fatalf("解析创建响应失败: %v", err)
+	}
+
+	at := time.Now().Add(-time.Minute)
+	if err := st.SaveDeployment(store.Deployment{
+		ID:        "dep-1",
+		ProjectID: created.ID,
+		Method:    "ssh",
+		Target:    "阿里云",
+		ImageRef:  "demo:1",
+		Status:    "deployed",
+		CreatedAt: at,
+	}); err != nil {
+		t.Fatalf("写入部署记录失败: %v", err)
+	}
+
+	// 编辑页只提交配置；更新响应必须回读已保留的部署状态，否则前端刚编辑完
+	// 就会把卡片状态清空，直到下一次刷新。
+	resp := do(t, srv, http.MethodPut, "/api/projects/"+created.ID, payload, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("更新项目应 200，得到 %d: %s", resp.Code, resp.Body.String())
+	}
+	var updated store.Project
+	if err := json.Unmarshal(resp.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("解析更新响应失败: %v", err)
+	}
+	if updated.LastDeploy == nil || updated.LastDeploy.Target != "阿里云" {
+		t.Fatalf("更新响应应保留 LastDeploy: %+v", updated.LastDeploy)
+	}
+	if updated.LastDeploys["阿里云"] == nil {
+		t.Fatalf("更新响应应保留 LastDeploys: %+v", updated.LastDeploys)
 	}
 }
 

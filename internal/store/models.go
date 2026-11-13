@@ -161,7 +161,13 @@ type Project struct {
 	// Targets are optional named publish destinations on top of the primary
 	// Deploy. Empty means "single target" — the legacy behaviour where the one
 	// Deploy config is the only destination.
-	Targets     []DeployTarget `json:"targets,omitempty"`
+	Targets []DeployTarget `json:"targets,omitempty"`
+	// PrimaryTarget optionally names one of Targets as the default publish
+	// destination. When set, a run with no explicit target resolves that
+	// target's full DeploySpec instead of the top-level Deploy mirror, so the
+	// edit form's port/host fields cannot drift away from the target they
+	// visually represent. Empty keeps the legacy top-level Deploy behaviour.
+	PrimaryTarget string `json:"primary_target,omitempty"`
 	Probe       ProbeSpec `json:"probe,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`

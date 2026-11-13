@@ -237,12 +237,17 @@ func (s *Server) handleProbeProject(w http.ResponseWriter, r *http.Request, id s
 		return
 	}
 	// An optional target name probes that named DeployTarget's address
-	// (probe.urls[target]); otherwise the project's primary Deploy is used.
+	// (probe.urls[target]); otherwise the project's bound primary target, then
+	// the top-level Deploy, is used.
 	var body struct {
 		Target string `json:"target"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body)
-	res := probe.Run(r.Context(), p, s.cfg, strings.TrimSpace(body.Target))
+	target := strings.TrimSpace(body.Target)
+	if target == "" {
+		target = strings.TrimSpace(p.PrimaryTarget)
+	}
+	res := probe.Run(r.Context(), p, s.cfg, target)
 	writeJSON(w, http.StatusOK, res)
 }
 
@@ -320,7 +325,16 @@ func (s *Server) updateProject(w http.ResponseWriter, r *http.Request, id string
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, p.Redacted())
+	// UpdateProject preserves derived fields (last_deploy/last_deploys) that
+	// the config-only edit payload does not carry. Return the stored project,
+	// not the incoming payload, so the UI does not clear the card's deployment
+	// status right after an edit.
+	updated, ok := s.store.GetProject(id)
+	if !ok {
+		writeError(w, http.StatusNotFound, "项目不存在")
+		return
+	}
+	writeJSON(w, http.StatusOK, updated.Redacted())
 }
 
 func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request, id string) {
@@ -340,7 +354,7 @@ func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request, id string
 // configured=false,前端不展示。
 var (
 	visitsPinRe    = regexp.MustCompile(`([A-Z][A-Z0-9_]*_VISIT_PIN)=(\S+)`)
-	visitsDomainRe = regexp.MustCompile(`公网域名\s+(\S+)`)
+	visitsDomainRe = regexp.MustCompile("公网域名\\s+([^\\s；;，,]+)")
 )
 
 // handleProjectVisits 代理线上访客统计。响应透传线上接口的 JSON,
@@ -395,6 +409,18 @@ func fetchVisits(client *http.Client, url, pin string) (map[string]any, error) {
 	var out map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return nil, fmt.Errorf("上游响应解析失败: %s", err.Error())
+	}
+	// lume-core 的 standalone server 对自定义路由固定回 200，PIN 拒绝只能
+	// 用响应体里的 status/error 表达；别把它当在线数据（否则前端显示 0）。
+	if code, ok := out["status"].(float64); ok && code >= 400 {
+		msg, _ := out["error"].(string)
+		if msg == "" {
+			msg = fmt.Sprintf("status %d", int(code))
+		}
+		return nil, fmt.Errorf("上游返回业务错误: %s", msg)
+	}
+	if msg, ok := out["error"].(string); ok && strings.TrimSpace(msg) != "" {
+		return nil, fmt.Errorf("上游返回业务错误: %s", msg)
 	}
 	return out, nil
 }

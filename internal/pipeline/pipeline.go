@@ -151,22 +151,26 @@ func (r *Runner) execute(ctl *runCtl, p store.Project, doBuild, doDeploy bool, m
 	}
 
 	// Apply a per-run deploy target / method override. A named target wins and
-	// uses that target's full DeploySpec; otherwise the project's primary Deploy
-	// is used with an optional method override. The resolved spec is written onto
-	// the local p.Deploy copy so deploy.Run / probe.Run / SaveDeployment below
-	// operate on the right configuration unchanged.
-	if strings.TrimSpace(targetName) != "" {
-		spec, rerr := p.ResolveDeploySpec(targetName, method)
-		if rerr != nil {
-			now := time.Now()
-			ctl.addStage(store.StageResult{Name: "deploy", Status: store.StatusFailed, Error: rerr.Error(), Log: rerr.Error(), EndedAt: now})
-			ctl.finish(store.StatusFailed)
-			return
-		}
-		p.Deploy = spec
-	} else if strings.TrimSpace(method) != "" {
-		p.Deploy.Method = method
+	// uses that target's full DeploySpec; otherwise a bound PrimaryTarget is
+	// the default destination, with an optional method override. The resolved
+	// spec is written onto the local p.Deploy copy so deploy.Run / probe.Run /
+	// SaveDeployment below operate on the right configuration unchanged.
+	// Always resolve here (even for an empty target/method) so PrimaryTarget is
+	// honored on the card's default "publish to main" path, which sends a
+	// method but no target name.
+	spec, rerr := p.ResolveDeploySpec(targetName, method)
+	if rerr != nil {
+		now := time.Now()
+		ctl.addStage(store.StageResult{Name: "deploy", Status: store.StatusFailed, Error: rerr.Error(), Log: rerr.Error(), EndedAt: now})
+		ctl.finish(store.StatusFailed)
+		return
 	}
+	p.Deploy = spec
+	// The effective publish destination: an explicit per-run target wins,
+	// otherwise a bound PrimaryTarget is the default. Probe URL lookup and the
+	// per-target deployment bucket both need this name, even when the card's
+	// "publish to main" path only sends a method and no explicit target.
+	effectiveTarget := effectiveDeployTarget(targetName, p)
 
 	// When an override switches to ssh but no registry path is configured
 	// (push=false and no explicit ssh_pull) and transfer wasn't already enabled,
@@ -262,7 +266,7 @@ func (r *Runner) execute(ctl *runCtl, p store.Project, doBuild, doDeploy bool, m
 		// probe escalates the whole run to 失败 (the rollout is not healthy).
 		var probeRes store.ProbeResult
 		if p.Probe.Enabled {
-			probeRes = probe.Run(ctx, p, r.cfg, targetName)
+			probeRes = probe.Run(ctx, p, r.cfg, effectiveTarget)
 			ctl.Write([]byte("服务探测: " + probeRes.Detail + "\n"))
 			ctl.setProbe(probeRes)
 			if probeRes.Status == "fail" || probeRes.Status == "err" {
@@ -278,7 +282,7 @@ func (r *Runner) execute(ctl *runCtl, p store.Project, doBuild, doDeploy bool, m
 			Cluster:     p.Deploy.Kubeconfig,
 			Namespace:   p.Deploy.Namespace,
 			Method:      p.Deploy.Method,
-			Target:      strings.TrimSpace(targetName),
+			Target:      effectiveTarget,
 			Status:      "deployed",
 			Probe:       probeRes,
 			CreatedAt:   time.Now(),
@@ -324,6 +328,16 @@ func (r *Runner) resolveTag(p store.Project, override string) (string, error) {
 }
 
 func defaultTag() string { return time.Now().Format("20060102-150405") }
+
+// effectiveDeployTarget returns the destination name used for probe URL lookup
+// and deployment history buckets. An explicit per-run target wins; otherwise
+// the project's bound PrimaryTarget is the default.
+func effectiveDeployTarget(targetName string, p store.Project) string {
+	if t := strings.TrimSpace(targetName); t != "" {
+		return t
+	}
+	return strings.TrimSpace(p.PrimaryTarget)
+}
 
 func isLocalGitDir(dir string) bool {
 	info, err := os.Stat(filepath.Join(dir, ".git"))
