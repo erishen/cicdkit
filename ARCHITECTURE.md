@@ -122,8 +122,9 @@ cicdkit/
 - `FSRoots` / `FSPathAllowed` 限制服务器侧目录浏览器的可访问范围，默认仅当前工作目录，避免枚举家目录。
 
 ### 5.2 `store` — 数据模型与持久化
-- **模型**（`models.go`）：`Project`（含 `BuildSpec` / `DeploySpec` / `ProbeSpec` / `Targets`）、`Run`（含 `Stages []StageResult`、`Diagnosis`、`Probe`）、`Deployment`、`DeployTarget`、`RunDiagnosis`、`ProbeResult`。
-- **存储**（`store.go`）：`jsonStore` 全量内存 + 延迟合并落盘（200ms 窗口，避免构建过程中每阶段一次写整文件）；写入走**临时文件 + 原子 rename**，文件权限 `0600`（含密钥）。`MaxRuns=200` 自动裁剪历史，但**永不淘汰未结束的 run**。
+- **模型**（`models.go`）：`Project`（含 `BuildSpec` / `DeploySpec` / `ProbeSpec` / `Targets`）、`Run`（含 `Stages []StageResult`、`Diagnosis`、`Probe`、`LogPath`）、`Deployment`、`DeployTarget`、`RunDiagnosis`、`ProbeResult`。
+- **存储**（`store.go`）：`jsonStore` 全量内存 + 延迟合并落盘（200ms 窗口，避免构建过程中每阶段一次写整文件）；写入走**临时文件 + 原子 rename**，文件权限 `0600`（含密钥）。`MaxRuns=200` 自动裁剪历史，但**永不淘汰未结束的 run**；每项目部署历史另有 `DefaultMaxDeploymentsPerProject=200` 上限（`SetMaxDeploymentsPerProject` 可覆盖）。
+- **外置全量日志**：每次 run 的完整日志实时追加到 `<runner.log_dir>/run-<id>.log`（`Run.LogPath`，默认 `<data_dir>/logs/`）；库内 `Run.Log` 只留约 256KB 截断尾巴作诊断/知识库摘要与旧 run 回退。写日志用 `runctl` 在每次 `Write` 时镜像，终态关闭 fd；清空运行记录时同步删日志文件。这样 store 保持精简，且日志在 SIGKILL（会丢 store 最后 200ms flush）后仍完整。
 - **向后兼容**：`backfillLastDeploy` / `backfillRunProbe` 在加载时把部署历史回填到项目卡片，并把「探测失败但曾被记为成功」的旧 run 升级为失败。
 - **脱敏**（`validate.go`）：`Redacted()` 把 registry 密码、SSH key 路径、kubeconfig 路径替换为 `********` 再经 API 外发；`MergeSecrets()` 保证 UI 的「读取→编辑→保存」往返不会因看不到密钥而误清空。
 
@@ -131,6 +132,8 @@ cicdkit/
 - `withAuth` 中间件：静态资源与 `/api/health`、`/api/version` 开放；`/api/webhook/*` 在配置了 `WebhookSecret` 时由自身校验；其余 `/api/*` 走 API Token（Bearer 或 `X-API-Token`，常量时间比较）。
 - `serveApp` 提供 SPA：真实文件直接服务，未知路由回退 `index.html`；当启用 `AUTO_TOKEN` 时把一次性 token 注入页面 `<script>`，本机浏览器自动鉴权。
 - 路由覆盖：项目增删改查/扫描/校验/探测/生成、运行触发/取消/诊断/采纳、部署历史、LLM 配置与测试、知识库、Webhook。
+- `/metrics`（`metrics.go`）：Prometheus 文本格式，**不鉴权**（非 `/api/*` 前缀，只读，同 `/api/health` 定位）。7 类指标全部从 store 现场派生：`active_runs` / `max_concurrent` / `runs_total{status}` / `deploys_total` / `probe_total{result}` / `build_seconds` / `deploy_seconds`（后两者为固定桶直方图）。标签只用有限枚举，绝不含项目名/镜像名/日志/client IP，避免未鉴权端点的高基数泄露。
+- `GET /api/runs/{id}/log?from=<字节偏移>`（`handleRunLogTail`）：增量日志尾——外置 `LogPath` 文件优先，读 `from` 之后的新字节并按 UTF-8 rune 边界对齐；无外置文件时回退到库内 `Log` 的 256KB 窗口。返回体含 `total_len` / `status` / `stages` / `probe` / `diagnosis` / `reset`；日志头截断或偏移越界时置 `reset=true` 令客户端清空缓冲。
 
 ### 5.4 `pipeline` — 编排核心
 - `Runner` 持有**并发信号量**（`MaxConcurrent`，默认 2），`execute` 先抢信号量再跑阶段。
@@ -189,8 +192,10 @@ UI 点击「发布」
        probe.Enabled? → probe.Run(HTTP 探测)，fail/err → probeFailed
        SaveDeployment(写部署历史 + 回填项目 LastDeploy)
        run = 成功（除非 probeFailed）
-  → 前端轮询 /api/runs/:id 拿阶段日志与状态
-  → 失败可「AI 诊断」→ 采纳进 kb
+  → 每阶段输出经 runctl.Write 实时镜像到 <log_dir>/run-<id>.log（终态关 fd）
+  → 前端轮询 /api/runs/:id/log?from=<偏移> 增量拉取日志尾巴与状态
+  → 失败可「AI 诊断」→ 采纳进 kb（从库内 Log 摘要取材）
+  → tsm-hub Prometheus 经 cicd-monitor 网络抓 /metrics（不发布宿主端口）
 ```
 
 取消：`POST /api/runs/:id/cancel` → `runner.Cancel` 调 `runCtl.cancel()` → `ctx` 取消，在途的 `docker`/`kubectl`/`ssh` 进程被杀死。
@@ -229,6 +234,7 @@ UI 点击「发布」
 | `data/store.json` | 项目 / 运行 / 部署历史（含 `ssh_key_path` 路径、registry 密码占位） | 0600 | 是 |
 | `data/llm.json` | LLM 配置（含真实 API Key） | 0600 | 是 |
 | `data/kb.json` | 采纳的 AI 诊断条目 | 0600 | 是（随 `data/*.json`） |
+| `<data_dir>/logs/run-<id>.log` | 每次运行的全量实时日志（`Run.LogPath`，可经 `RUNNER_LOG_DIR` 改路径） | 默认 | 是（`*.log` / `/data/logs/`） |
 
 合并写入用「临时文件 + `os.Rename` 原子替换」，200ms 合并窗口避免高频写。`CICD_REGISTRY_PASSWORD` 配置时，落盘用占位符、运行时再从环境变量还原真实密码，使磁盘上永不留明文密钥。
 
@@ -286,6 +292,7 @@ UI 点击「发布」
 - **macOS 15 链接坑**：本地 `go build`/`go run`/`go test` 需 `CGO_ENABLED=1 -linkmode=external`，否则二进制因缺 `LC_UUID` 一绑端口即 abort；Linux 交叉编译无此问题（Makefile 已处理）。
 - **构建上下文必须是服务器可访问的绝对路径**：浏览器目录选择器拿不到真实路径，创建项目时需手动补全 `build.context`。
 - **网络/代理**：国内环境 `npm install` 可能需 `--registry https://registry.npmmirror.com`；Go 纯标准库无此问题。
+- **外部网络 `cicd-monitor` 须先创建**：`docker-compose.yml` 把 cicdkit 加入 `external: true` 的 `cicd-monitor`，供 tsm-hub 的 Prometheus 经容器 DNS 抓 `/metrics`。首次 `docker compose up` 前须执行一次 `docker network create cicd-monitor`（幂等），否则会因网络不存在启动失败。`/metrics` 不鉴权、不发布宿主端口，仅限该内部网络可达。
 
 ---
 

@@ -22,15 +22,34 @@ const PROBE_VIEW = {
 }
 
 export default function LogModal({ runId, onClose, onRunDone }) {
-  const [run, setRun] = useState(null)
+  const [run, setRun] = useState(null)          // 元数据视图：{status, stages, probe}
+  const [logText, setLogText] = useState('')    // 已渲染的日志内容
   const [fullscreen, setFullscreen] = useState(false)
   const [copied, setCopied] = useState(false)
   const logRef = useRef(null)
   const timer = useRef(null)
+  const fromRef = useRef(0)      // 已渲染日志在服务端 run.log 中的字节偏移
+  const busyRef = useRef(false)  // 防止并发增量请求交错
+
+  // 服务端按 UTF-8 字节切分日志（Go string），而 JS 字符串是 UTF-16 码元，
+  // 中文环境下 s.length !== 字节数。用 Blob.size 取真实 UTF-8 字节长度。
+  const byteLen = (s) => {
+    try { return new Blob([s]).size } catch { return s.length }
+  }
 
   const load = async () => {
+    if (busyRef.current) return
+    busyRef.current = true
     try {
-      const r = await API.getRun(runId)
+      const r = await API.getRunLog(runId, fromRef.current)
+      if (r.reset) {
+        // 首次加载（返回日志尾部）或服务端日志被头部截断：整体重渲染。
+        setLogText(r.log)
+        fromRef.current = r.log_len - byteLen(r.log)
+      } else {
+        setLogText((prev) => prev + r.log)
+        fromRef.current += byteLen(r.log)
+      }
       setRun(r)
       if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
       const live = r.status === 'running' || r.status === 'queued'
@@ -40,10 +59,12 @@ export default function LogModal({ runId, onClose, onRunDone }) {
         // project list so the card's "最近部署" (last_deploy) reflects this run.
         if (onRunDone) onRunDone()
       }
-    } catch (e) { /* ignore transient */ }
+    } catch (e) { /* ignore transient */ } finally { busyRef.current = false }
   }
 
   useEffect(() => {
+    fromRef.current = 0
+    setLogText('')
     load()
     timer.current = setInterval(load, 1500)
     return () => { if (timer.current) clearInterval(timer.current) }
@@ -64,7 +85,7 @@ export default function LogModal({ runId, onClose, onRunDone }) {
   // 复制当前日志输出到剪贴板；优先走 async Clipboard API，非安全上下文
   // （如 http://LAN-IP）或旧浏览器回退到 execCommand。
   const copyLog = async () => {
-    const text = run ? (run.log || '(无输出)') : ''
+    const text = logText || '(无输出)'
     let ok = false
     try {
       if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -142,7 +163,7 @@ export default function LogModal({ runId, onClose, onRunDone }) {
             })()}
           </div>
         )}
-        <pre className="log" ref={logRef}>{run ? (run.log || '(无输出)') : '加载中…'}</pre>
+        <pre className="log" ref={logRef}>{logText || (run ? '(无输出)' : '加载中…')}</pre>
       </div>
     </Modal>
   )

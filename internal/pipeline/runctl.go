@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"os"
 	"sync"
 	"time"
 
@@ -9,9 +10,11 @@ import (
 )
 
 const (
-	// maxRunLogBytes caps a single run's stored log. A docker build can emit
-	// megabytes; for diagnosis only the tail matters, and an unbounded log gets
-	// rewritten into store.json on every flush.
+	// maxRunLogBytes caps a single run's in-store log summary. A docker build
+	// can emit megabytes; for diagnosis only the tail matters, and an unbounded
+	// log gets rewritten into store.json on every flush. The FULL log is
+	// streamed to the external log file (see Runner.launch / openRunLog), so
+	// this cap now only bounds the in-store summary.
 	maxRunLogBytes = 256 << 10
 	truncNotice    = "\n… (日志过长，已截断，仅保留最近内容) …\n"
 
@@ -33,10 +36,21 @@ type runCtl struct {
 	canceled bool
 	dirty    bool
 	timer    *time.Timer
+	// logFile is the run's external full log (<log_dir>/run-<id>.log, O_APPEND).
+	// Every Write is mirrored to it in real time, so the log outlives a crash;
+	// the in-memory run.Log is only the capped summary. Nil in tests / when the
+	// log directory is not configured.
+	logFile *os.File
 }
 
 func newRunCtl(run store.Run, st store.Store) *runCtl {
-	return &runCtl{run: run, store: st}
+	return newRunCtlWithLog(run, st, nil)
+}
+
+// newRunCtlWithLog is newRunCtl plus an optional external full-log file. The
+// file is closed when the run reaches a terminal state (or cancel).
+func newRunCtlWithLog(run store.Run, st store.Store, logFile *os.File) *runCtl {
+	return &runCtl{run: run, store: st, logFile: logFile}
 }
 
 func (c *runCtl) id() string { return c.run.ID }
@@ -64,6 +78,14 @@ func (c *runCtl) imageTag() string {
 func (c *runCtl) Write(p []byte) (int, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	// Mirror to the external full-log file first (O_APPEND, real-time) so the
+	// log survives a crash; the in-memory Log is only the capped summary.
+	if c.logFile != nil {
+		if _, werr := c.logFile.Write(p); werr != nil {
+			// A log-file write failure must not break the run — fall back to
+			// the in-store summary only. Swallow the error but keep memory.
+		}
+	}
 	c.run.Log += string(p)
 	if len(c.run.Log) > maxRunLogBytes {
 		keep := maxRunLogBytes - len(truncNotice)
@@ -130,6 +152,7 @@ func (c *runCtl) cancel() {
 	fn := c.cancelFn
 	c.dirty = true
 	c.flushLocked()
+	c.closeLogLocked()
 	c.mu.Unlock()
 	if fn != nil {
 		fn()
@@ -185,4 +208,16 @@ func (c *runCtl) finish(status store.RunStatus) {
 	c.run.EndedAt = time.Now()
 	c.dirty = true
 	c.flushLocked()
+	c.closeLogLocked()
+}
+
+// closeLogLocked closes the external full-log file once the run is terminal so
+// the fd is not held after the pipeline ends. Idempotent; must be called with
+// c.mu held. The file (and its bytes) stay on disk for later retrieval via
+// Run.LogPath; only the open handle is released here.
+func (c *runCtl) closeLogLocked() {
+	if c.logFile != nil {
+		_ = c.logFile.Close()
+		c.logFile = nil
+	}
 }

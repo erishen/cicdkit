@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -84,14 +85,39 @@ type jsonStore struct {
 	runs        []Run
 	deployments []Deployment
 	maxRuns     int
+	// maxDeploysPerProject caps each project's retained deployment history;
+	// the deployment list was previously unbounded and store.json grew forever.
+	maxDeploysPerProject int
 }
 
 // DefaultMaxRuns is the retained run history size (each run embeds its log).
 const DefaultMaxRuns = 200
 
+// DefaultMaxDeploymentsPerProject bounds each project's retained deployment
+// history (the deployment list was previously unbounded).
+const DefaultMaxDeploymentsPerProject = 200
+
+// maxPersistedProbeBodyBytes caps the probe response body written to disk.
+const maxPersistedProbeBodyBytes = 2 * 1024
+
+// truncateProbeBody shortens a persisted probe body to a small tail with a
+// notice. In-memory probe results keep the full body (probe.MaxBody) for the
+// UI; only the on-disk copy is trimmed.
+func truncateProbeBody(body string) string {
+	if len(body) <= maxPersistedProbeBodyBytes {
+		return body
+	}
+	notice := "\n… (响应体过长，已截断，仅保留末尾 " + strconv.Itoa(maxPersistedProbeBodyBytes) + " 字节) …\n"
+	keep := maxPersistedProbeBodyBytes - len(notice)
+	if keep < 0 {
+		keep = 0
+	}
+	return notice + body[len(body)-keep:]
+}
+
 // NewJsonStore opens (or initializes) the store at path.
 func NewJsonStore(path string) (*jsonStore, error) {
-	s := &jsonStore{path: path, maxRuns: DefaultMaxRuns}
+	s := &jsonStore{path: path, maxRuns: DefaultMaxRuns, maxDeploysPerProject: DefaultMaxDeploymentsPerProject}
 	if err := s.load(); err != nil {
 		return nil, err
 	}
@@ -117,6 +143,7 @@ func (s *jsonStore) load() error {
 	s.projects = data.Projects
 	s.runs = data.Runs
 	s.deployments = data.Deployments
+	s.trimDeploymentsLocked()
 	s.backfillLastDeploy()
 	s.backfillRunProbe()
 	return nil
@@ -129,6 +156,22 @@ func (s *jsonStore) load() error {
 // startup, without waiting for a fresh deploy. It only mutates the in-memory
 // slice; persistence happens on the next mutation (e.g. a new deployment), so a
 // stale store.json is never needlessly rewritten at load time.
+// lastDeployInfo builds the project-level snapshot of a successful deployment.
+// Shared by backfillLastDeploy (startup recomputation) and SaveDeployment
+// (incremental update) so the two paths cannot drift apart, and each call
+// returns a distinct pointer (the old SaveDeployment aliased one struct into
+// both LastDeploy and LastDeploys[key]).
+func lastDeployInfo(d Deployment) *LastDeployInfo {
+	return &LastDeployInfo{
+		Method:      d.Method,
+		Target:      d.Target,
+		ImageRef:    d.ImageRef,
+		At:          d.CreatedAt,
+		ProbeStatus: d.Probe.Status,
+		ProbeURL:    d.Probe.URL,
+	}
+}
+
 func (s *jsonStore) backfillLastDeploy() {
 	// newest[projectID] = most recent successful deployment (for LastDeploy).
 	newest := make(map[string]Deployment)
@@ -155,28 +198,14 @@ func (s *jsonStore) backfillLastDeploy() {
 	}
 	for i := range s.projects {
 		if d, ok := newest[s.projects[i].ID]; ok {
-			s.projects[i].LastDeploy = &LastDeployInfo{
-				Method:      d.Method,
-				Target:      d.Target,
-				ImageRef:    d.ImageRef,
-				At:          d.CreatedAt,
-				ProbeStatus: d.Probe.Status,
-				ProbeURL:    d.Probe.URL,
-			}
+			s.projects[i].LastDeploy = lastDeployInfo(d)
 		}
 		if buckets, ok := perDest[s.projects[i].ID]; ok {
 			if s.projects[i].LastDeploys == nil {
 				s.projects[i].LastDeploys = make(map[string]*LastDeployInfo)
 			}
 			for key, d := range buckets {
-				s.projects[i].LastDeploys[key] = &LastDeployInfo{
-					Method:      d.Method,
-					Target:      d.Target,
-					ImageRef:    d.ImageRef,
-					At:          d.CreatedAt,
-					ProbeStatus: d.Probe.Status,
-					ProbeURL:    d.Probe.URL,
-				}
+				s.projects[i].LastDeploys[key] = lastDeployInfo(d)
 			}
 		}
 	}
@@ -280,13 +309,23 @@ func (s *jsonStore) flushNow() {
 			}
 		}
 	}
+	// Truncate persisted probe bodies: matching (BodyContains) already happened
+	// at probe time, the body is only kept for UI inspection, so a small tail
+	// is enough and a misbehaving 64KB response cannot bloat the store.
+	trimmed := make([]Deployment, len(s.deployments))
+	copy(trimmed, s.deployments)
+	for i := range trimmed {
+		trimmed[i].Probe.Body = truncateProbeBody(trimmed[i].Probe.Body)
+	}
 	data := struct {
 		Projects    []Project    `json:"projects"`
 		Runs        []Run        `json:"runs"`
 		Deployments []Deployment `json:"deployments"`
-	}{ps, s.runs, s.deployments}
+	}{ps, s.runs, trimmed}
 	s.mu.RUnlock()
-	b, err := json.MarshalIndent(data, "", "  ")
+	// Compact (unindented) JSON: the store is machine-written, never hand-read,
+	// and indented output inflates the file ~30% on every flush.
+	b, err := json.Marshal(data)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "store persist marshal error: %v\n", err)
 		return
@@ -294,15 +333,15 @@ func (s *jsonStore) flushNow() {
 	tmp := s.path + ".tmp"
 	// 0600: the store can hold secrets (registry password, ssh key paths); only
 	// the owning user should be able to read it even when a secret is persisted.
+	// WriteFile applies 0600 at creation; the explicit Chmod also covers a
+	// leftover tmp from a crashed run (WriteFile would just truncate it,
+	// keeping the old mode), and the chmod targets the NEW inode that the
+	// atomic rename below promotes — the old file's permissions are irrelevant.
 	if err := os.WriteFile(tmp, b, 0o600); err != nil {
 		fmt.Fprintf(os.Stderr, "store persist write error: %v\n", err)
 		return
 	}
-	if err := os.Chmod(s.path, 0o600); err != nil {
-		// best-effort; the freshly written tmp already has 0600 and will be the
-		// canonical file after the atomic rename below.
-		_ = err
-	}
+	_ = os.Chmod(tmp, 0o600)
 	if err := os.Rename(tmp, s.path); err != nil {
 		fmt.Fprintf(os.Stderr, "store persist rename error: %v\n", err)
 	}
@@ -533,6 +572,63 @@ func (s *jsonStore) SetMaxRuns(n int) {
 	s.trimRunsLocked()
 }
 
+// SetMaxDeploymentsPerProject bounds how much deployment history is retained per
+// project (default DefaultMaxDeploymentsPerProject). Deployments are cheap rows
+// but each embeds a probe result, so an unbounded list still bloats store.json.
+func (s *jsonStore) SetMaxDeploymentsPerProject(n int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.maxDeploysPerProject = n
+	s.trimDeploymentsLocked()
+}
+
+// trimDeploymentsLocked keeps, per project, only the newest maxDeploysPerProject
+// deployments. Must be called with s.mu held (or on the freshly loaded store
+// before it is shared).
+func (s *jsonStore) trimDeploymentsLocked() {
+	if s.maxDeploysPerProject <= 0 {
+		return
+	}
+	// Group by project, newest first.
+	byProject := make(map[string][]int)
+	for i := range s.deployments {
+		pid := s.deployments[i].ProjectID
+		byProject[pid] = append(byProject[pid], i)
+	}
+	drop := make([]bool, len(s.deployments))
+	for _, idxs := range byProject {
+		// Sort these indexes by CreatedAt desc.
+		sort.Slice(idxs, func(a, b int) bool {
+			ia, ib := idxs[a], idxs[b]
+			if !s.deployments[ia].CreatedAt.Equal(s.deployments[ib].CreatedAt) {
+				return s.deployments[ia].CreatedAt.After(s.deployments[ib].CreatedAt)
+			}
+			return s.deployments[ia].ID > s.deployments[ib].ID
+		})
+		for k := s.maxDeploysPerProject; k < len(idxs); k++ {
+			drop[idxs[k]] = true
+		}
+	}
+	kept := s.deployments[:0]
+	for i, d := range s.deployments {
+		if !drop[i] {
+			kept = append(kept, d)
+		}
+	}
+	s.deployments = kept
+}
+
+// removeRunLogs best-effort deletes the external log files of the given runs.
+// A missing file (older run, or already cleaned up) is not an error. Must be
+// called with s.mu held (or on the freshly loaded store before it is shared).
+func (s *jsonStore) removeRunLogs(runs []Run) {
+	for i := range runs {
+		if p := runs[i].LogPath; p != "" {
+			_ = os.Remove(p)
+		}
+	}
+}
+
 func (s *jsonStore) trimRunsLocked() {
 	if s.maxRuns <= 0 || len(s.runs) <= s.maxRuns {
 		return
@@ -557,6 +653,12 @@ func (s *jsonStore) trimRunsLocked() {
 		budget = len(done)
 	}
 	kept := append(live, done[:budget]...)
+	// The dropped tail (done[budget:]) is finished & no longer retained; remove
+	// their external log files. live runs are never dropped here, so their
+	// open log files are untouched.
+	if len(done) > budget {
+		s.removeRunLogs(done[budget:])
+	}
 	sort.Slice(kept, func(i, j int) bool {
 		if !kept[i].CreatedAt.Equal(kept[j].CreatedAt) {
 			return kept[i].CreatedAt.Before(kept[j].CreatedAt)
@@ -641,20 +743,14 @@ func (s *jsonStore) SaveDeployment(d Deployment) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.deployments = append(s.deployments, d)
+	s.trimDeploymentsLocked()
 	// Keep the project's LastDeploy in sync with the latest successful rollout.
 	// Only successful deploys count, so a failed run never clobbers a good one.
+	// Shared lastDeployInfo() keeps this path in lockstep with backfillLastDeploy.
 	if d.Status == "deployed" {
 		for i := range s.projects {
 			if s.projects[i].ID == d.ProjectID {
-				info := &LastDeployInfo{
-					Method:      d.Method,
-					Target:      d.Target,
-					ImageRef:    d.ImageRef,
-					At:          d.CreatedAt,
-					ProbeStatus: d.Probe.Status,
-					ProbeURL:    d.Probe.URL,
-				}
-				s.projects[i].LastDeploy = info
+				s.projects[i].LastDeploy = lastDeployInfo(d)
 				// Per-destination bucket: key by target name when published to a
 				// named target, otherwise by the deploy method (e.g. "local-k3s").
 				key := d.Target
@@ -664,7 +760,7 @@ func (s *jsonStore) SaveDeployment(d Deployment) error {
 				if s.projects[i].LastDeploys == nil {
 					s.projects[i].LastDeploys = make(map[string]*LastDeployInfo)
 				}
-				s.projects[i].LastDeploys[key] = info
+				s.projects[i].LastDeploys[key] = lastDeployInfo(d)
 				break
 			}
 		}
@@ -676,6 +772,10 @@ func (s *jsonStore) SaveDeployment(d Deployment) error {
 func (s *jsonStore) ClearRuns() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Remove the external log files of the runs being wiped so <log_dir> does
+	// not outlive the run history it belongs to. In-flight runs keep their
+	// open handles; their finish() will re-save them, which re-appends them.
+	s.removeRunLogs(s.runs)
 	s.runs = nil
 	s.persist()
 	return nil

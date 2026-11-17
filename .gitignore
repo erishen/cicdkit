@@ -9,6 +9,8 @@ examples/hello-java/target/
 /data/*.json
 /data-docker
 /data-docker/*.json
+# 外置运行日志（P4：<data_dir>/logs/run-<id>.log，随 run 增删；*.log 已覆盖，此处显式声明目录意图）
+/data/logs/
 
 # 本地配置（含密钥，禁止提交）
 config.json
@@ -54,3 +56,5 @@ cmd/server/web/dist/
 .go-cache/
 .go-gopath/
 .go-tmp/
+# Go 模块下载缓存(GOMODCACHE 重定向到仓库根, 含 toolchain 锁文件, 禁止提交)
+.gomodcache/

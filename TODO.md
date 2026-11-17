@@ -114,3 +114,22 @@ Status: fixed (2026-10-22).
       `GET /` 返回 200，响应头 `X-Powered-By: PHP/8.3.36`。
 - [x] 如果该示例不再维护，明确标记为“仅本地演示、禁止公网部署”，
       或从默认示例清单中移除（当前仍在维护，暂不处理）。
+
+---
+
+## 七、已实现：外置全量日志 + Prometheus 指标 + store 瘦身（2026-11-15）
+
+> 状态：代码已在工作区完成并经 `go vet` / `go test -race` / `go build` 验证；
+> 2026-11-17 补齐示例配置与双版文档。**尚未提交/推送**。
+
+- [x] **P4 外置全量日志**：`Runner.LogDir` / `RUNNER_LOG_DIR` / `EffectiveLogDir()`（默认 `<data_dir>/logs`）；`Run.LogPath`；`runctl.Write` 实时镜像到 `run-<id>.log`，终态关 fd。
+- [x] **增量日志端点**：`GET /api/runs/{id}/log?from=<字节偏移>`，外置文件优先、库内 256KB 尾巴回退，UTF-8 rune 对齐，`reset` 复位；前端 `api.js` / `LogModal.jsx` 按偏移轮询。
+- [x] **store 瘦身与一致性**：probe 响应落盘截 2KB、`json.Marshal` 紧凑化、临时文件 `Chmod 0600` 修正、每项目部署史上限 200（`DefaultMaxDeploymentsPerProject`，`SetMaxDeploymentsPerProject` 可覆盖）、修 `LastDeploy` 指针别名、清 run 同步删日志文件。
+- [x] **Prometheus 指标**：`internal/api/metrics.go` 的 `/metrics`（7 类指标、固定桶、有限枚举标签、不鉴权）+ 2 个测试；`server.go` 注册；compose 加入外部网络 `cicd-monitor`，由 tsm-hub 的 Prometheus 经容器 DNS 抓取（不发布宿主端口）。
+- [x] **配置与文档同步**：`.env.example` / `config.example.json` 补 `RUNNER_LOG_DIR` / `runner.log_dir`；README 中英双版补配置项、REST API、运行日志、可观测性与安全提示；`ARCHITECTURE.md` 补模型/存储/API/生命周期/持久化/运维约束；`.gitignore` 忽略 `.gomodcache/`。
+
+### 后续观察（不影响功能，未改）
+
+- `SetMaxDeploymentsPerProject` 目前无调用点，默认值 200 已在 `NewJsonStore` 生效，属预留 API。
+- `handlers.go` 的 `buildRunLogs()` / `extractFailure()` 仍读 `StageResult.Log`，而 `build.go` / `deploy.go` 已不再填充它；有 `st.Error` 兜底、全量日志在 `run.Log`，影响可控，但失败阶段的 AI 诊断 excerpt/keyword 少一路回退，后续可改为读外置日志文件。
+- 前端 `cmd/server/web/dist` 未入库（CI 每次重建）；本地要看增量日志效果需 `npm run build`。

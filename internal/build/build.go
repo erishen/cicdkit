@@ -113,19 +113,18 @@ func Run(ctx context.Context, cfg DockerConfig, p store.Project, tag string, log
 
 		cmd := exec.CommandContext(ctx, "docker", args...)
 		cmd.Env = dockerEnv(cfg)
-		var buf bytes.Buffer
-		cmd.Stdout = io.MultiWriter(log, &buf)
-		cmd.Stderr = io.MultiWriter(log, &buf)
+		// Stream straight to the run log writer; no second copy is kept for
+		// StageResult.Log (runCtl.Log is the single source of truth).
+		cmd.Stdout = log
+		cmd.Stderr = log
 		if err := cmd.Run(); err != nil {
 			res.Status = store.StatusFailed
 			res.Error = err.Error()
-			res.Log = buf.String()
 			res.EndedAt = time.Now()
 			return res, err
 		}
 		res.ArtifactPath = tarPath
 		res.Status = store.StatusSuccess
-		res.Log = buf.String()
 		res.EndedAt = time.Now()
 		return res, nil
 	}
@@ -153,18 +152,18 @@ func Run(ctx context.Context, cfg DockerConfig, p store.Project, tag string, log
 
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	cmd.Env = dockerEnv(cfg)
-	var buf bytes.Buffer
-	cmd.Stdout = io.MultiWriter(log, &buf)
-	cmd.Stderr = io.MultiWriter(log, &buf)
+	// Stream straight to the run log writer; no second copy is kept for
+	// StageResult.Log (runCtl.Log is the single source of truth, see
+	// store.Run.Log / pipeline.runCtl.Write).
+	cmd.Stdout = log
+	cmd.Stderr = log
 	if err := cmd.Run(); err != nil {
 		res.Status = store.StatusFailed
 		res.Error = err.Error()
-		res.Log = buf.String()
 		res.EndedAt = time.Now()
 		return res, err
 	}
 	res.Status = store.StatusSuccess
-	res.Log = buf.String()
 	res.EndedAt = time.Now()
 	return res, nil
 }
@@ -249,18 +248,18 @@ func Push(ctx context.Context, cfg DockerConfig, p store.Project, imageRef strin
 	res := store.StageResult{Name: "push", Status: store.StatusRunning, StartedAt: start}
 	cmd := exec.CommandContext(ctx, "docker", "push", imageRef)
 	cmd.Env = dockerEnv(cfg)
-	var buf bytes.Buffer
-	cmd.Stdout = io.MultiWriter(log, &buf)
-	cmd.Stderr = io.MultiWriter(log, &buf)
+	// Stream straight to the run log writer; no second copy is kept for
+	// StageResult.Log (runCtl.Log is the single source of truth, see
+	// store.Run.Log / pipeline.runCtl.Write).
+	cmd.Stdout = log
+	cmd.Stderr = log
 	if err := cmd.Run(); err != nil {
 		res.Status = store.StatusFailed
 		res.Error = err.Error()
-		res.Log = buf.String()
 		res.EndedAt = time.Now()
 		return res, err
 	}
 	res.Status = store.StatusSuccess
-	res.Log = buf.String()
 	res.EndedAt = time.Now()
 	return res, nil
 }
@@ -269,11 +268,13 @@ func dockerLogin(ctx context.Context, reg store.RegistryAuth, log io.Writer) err
 	cmd := exec.CommandContext(ctx, "docker", "login", reg.Server, "-u", reg.Username, "--password-stdin")
 	cmd.Env = os.Environ()
 	cmd.Stdin = strings.NewReader(reg.Password)
-	var buf bytes.Buffer
-	cmd.Stdout = io.MultiWriter(log, &buf)
-	cmd.Stderr = io.MultiWriter(log, &buf)
+	// Stream straight to the run log writer; no second copy is kept for
+	// StageResult.Log (runCtl.Log is the single source of truth, see
+	// store.Run.Log / pipeline.runCtl.Write).
+	cmd.Stdout = log
+	cmd.Stderr = log
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("%v: %s", err, buf.String())
+		return err
 	}
 	return nil
 }

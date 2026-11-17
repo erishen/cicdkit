@@ -228,6 +228,13 @@ type Run struct {
 	StartedAt   time.Time      `json:"started_at,omitempty"`
 	EndedAt     time.Time      `json:"ended_at,omitempty"`
 	Log         string        `json:"log"`
+	// LogPath is the on-disk full log file for this run (<log_dir>/run-<id>.log).
+	// The in-memory Log keeps only the capped tail as an in-store summary and
+	// fallback for diagnosis / the knowledge base; the full log (including
+	// everything before the 256KB cap) lives in the external file and survives
+	// a crash, because it is appended to in real time.
+	// Older runs (no external file) have an empty LogPath: the API falls back to Log.
+	LogPath     string        `json:"log_path,omitempty"`
 	// Diagnosis caches the last AI failure analysis for this run so re-opening
 	// it does not re-call the model, and records whether the operator adopted it
 	// into the knowledge base (Adopted) or marked it not useful (Rejected).

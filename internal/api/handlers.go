@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/erishen/cicdkit/internal/build"
 	"github.com/erishen/cicdkit/internal/check"
@@ -673,12 +675,157 @@ func (s *Server) handleRunByID(w http.ResponseWriter, r *http.Request) {
 		s.handleAdoptDiagnosis(w, r, id)
 		return
 	}
+	if len(parts) > 1 && parts[1] == "log" && r.Method == http.MethodGet {
+		s.handleRunLogTail(w, r, id)
+		return
+	}
 	run, ok := s.store.GetRun(id)
 	if !ok {
 		writeError(w, http.StatusNotFound, "运行不存在")
 		return
 	}
 	writeJSON(w, http.StatusOK, run)
+}
+
+// tailMaxLogBytes caps how much of a very long log the incremental endpoint
+// returns on a fresh (from=0) poll — the modal opens on the tail of the log,
+// not on page 1. Matches runCtl's own display window.
+const tailMaxLogBytes = 256 * 1024
+
+// handleRunLogTail serves the incremental log tail for the UI's polling loop.
+// GET /api/runs/{id}/log?from=<byteOffset>
+//
+// The full run log can reach the 256KB cap (maxRunLogBytes) and re-fetching the
+// whole object on every 1.5s poll is wasteful, so the client tracks the length
+// it already rendered and asks for only the new tail. `from` is a byte offset
+// into run.Log; 0/omitted means "give me the last tailMaxLogBytes so the modal
+// opens on the tail of a long log".
+//
+// Response: {"log": <new tail>, "log_len": <total>, "status": <run status>,
+// "stages": [...], "probe": {...}, "diagnosis": {...}, "reset": <bool>}
+//
+// `reset` is true when the stored log was truncated from the head (a very long
+// build) or when the offset went past the current log: the client must
+// re-render from log[0] and re-baseline log_len. Stages/probe/diagnosis are
+// included so the poll stays a single request and the stage row + 服务探测 step
+// keep updating without a separate full run fetch.
+func (s *Server) handleRunLogTail(w http.ResponseWriter, r *http.Request, id string) {
+	run, ok := s.store.GetRun(id)
+	if !ok {
+		writeError(w, http.StatusNotFound, "运行不存在")
+		return
+	}
+	fromStr := r.URL.Query().Get("from")
+	from, _ := strconv.Atoi(fromStr)
+
+	// Resolve the tail: prefer the external append-only log file (byte-stable
+	// offsets, truly incremental even past the 256KB in-store cap); fall back
+	// to the capped in-memory Run.Log for older runs or a deleted file.
+	log, totalLen, reset, useFile := "", 0, false, false
+	if run.LogPath != "" {
+		if tail, total, rset, err := readRunLogFileTail(run.LogPath, from, tailMaxLogBytes); err == nil {
+			log, totalLen, reset, useFile = tail, total, rset, true
+		}
+	}
+	if !useFile {
+		// In-memory fallback. Offsets are unstable here (the 256KB cap
+		// head-truncates the log, shifting earlier offsets), so re-serve the
+		// capped window and force a client reset whenever our offset no longer
+		// lands inside it.
+		src := run.Log
+		if from <= 0 || from > len(src) {
+			if len(src) > tailMaxLogBytes {
+				from = len(src) - tailMaxLogBytes
+			} else {
+				from = 0
+			}
+			reset = true
+		}
+		// Nudge to a UTF-8 rune start so the JSON string stays valid.
+		for from < len(src) && !utf8.RuneStart(src[from]) {
+			from++
+		}
+		log = src[from:]
+		totalLen = len(src)
+	}
+
+	out := struct {
+		Log       string      `json:"log"`
+		LogLen    int        `json:"log_len"`
+		Status    string    `json:"status"`
+		Stages    interface{} `json:"stages"`
+		Probe     interface{} `json:"probe,omitempty"`
+		Diagnosis interface{} `json:"diagnosis,omitempty"`
+		Reset     bool       `json:"reset"`
+	}{log, totalLen, string(run.Status), run.Stages, run.Probe, run.Diagnosis, reset}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// readRunLogFileTail reads the append-only external log file from byte offset
+// `from` to end. On a first fetch (from<=0) it baselines on the last
+// tailMaxBytes so the modal opens on the tail of a very long log. Returns the
+// tail string, the file's total byte size (for the client to advance its
+// offset), whether the client must reset its rendered buffer, and any error.
+// The UTF-8 nudge to a rune start happens here so the tail is always valid
+// UTF-8 even when `from` landed mid-character.
+func readRunLogFileTail(path string, from int, tailMaxBytes int) (string, int, bool, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", 0, false, err
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		return "", 0, false, err
+	}
+	total := int(fi.Size())
+	reset := false
+	if from <= 0 {
+		// Initial fetch: open on the last window (or the whole log if shorter).
+		if total > tailMaxBytes {
+			from = total - tailMaxBytes
+		} else {
+			from = 0
+		}
+		reset = true
+	} else if from > total {
+		// Defensive: client's offset is beyond the file (shouldn't happen for an
+		// append-only log, but recover by re-serving the tail window).
+		if total > tailMaxBytes {
+			from = total - tailMaxBytes
+		} else {
+			from = 0
+		}
+		reset = true
+	}
+	if from > 0 {
+		if _, err := f.Seek(int64(from), io.SeekStart); err != nil {
+			return "", total, false, err
+		}
+		var c [1]byte
+		for {
+			_, rerr := f.Read(c[:])
+			if rerr != nil {
+				break // EOF or read gap: current position is the start
+			}
+			if utf8.RuneStart(c[0]) {
+				break
+			}
+			from++
+		}
+	}
+	if _, err := f.Seek(int64(from), io.SeekStart); err != nil {
+		return "", total, false, err
+	}
+	rest := total - from
+	if rest < 0 {
+		rest = 0
+	}
+	buf := make([]byte, rest)
+	if _, err := io.ReadFull(f, buf); err != nil && err != io.ErrUnexpectedEOF {
+		return "", total, false, err
+	}
+	return string(buf), total, reset, nil
 }
 
 // ---- Deployments ----

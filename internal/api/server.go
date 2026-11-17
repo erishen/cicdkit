@@ -130,6 +130,9 @@ func tokenMatches(r *http.Request, want string) bool {
 func (s *Server) routes(webFS fs.FS) {
 	s.mux.HandleFunc("/api/health", s.handleHealth)
 	s.mux.HandleFunc("/api/version", s.handleVersion)
+	// Prometheus 指标（不鉴权，供 tsm-hub 的 Prometheus 容器走容器 DNS 抓取；
+	// 与 /api/health 同为只读状态端点，标签只用有限枚举，无高基数泄露）。
+	s.mux.HandleFunc("/metrics", s.handleMetrics)
 	s.mux.HandleFunc("/api/projects", s.methodSwitch(map[string]http.HandlerFunc{
 		http.MethodGet:  s.handleListProjects,
 		http.MethodPost: s.handleCreateProject,

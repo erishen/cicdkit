@@ -35,8 +35,9 @@ func Run(ctx context.Context, cfg KubeConfig, p store.Project, imageRef string, 
 	start := time.Now()
 	res := store.StageResult{Name: "deploy", Status: store.StatusRunning, StartedAt: start}
 	spec := p.Deploy
-	var buf bytes.Buffer
-	logw := io.MultiWriter(log, &buf)
+	// Stream straight to the run log writer; no second copy is kept for
+	// StageResult.Log (runCtl.Log is the single source of truth).
+	logw := log
 
 	switch spec.Method {
 	case "kubectl-apply", "kubectl-set-image", "helm":
@@ -44,7 +45,6 @@ func Run(ctx context.Context, cfg KubeConfig, p store.Project, imageRef string, 
 		if err != nil {
 			res.Status = store.StatusFailed
 			res.Error = err.Error()
-			res.Log = buf.String()
 			res.EndedAt = time.Now()
 			return res, err
 		}
@@ -54,7 +54,6 @@ func Run(ctx context.Context, cfg KubeConfig, p store.Project, imageRef string, 
 		if err := cmd.Run(); err != nil {
 			res.Status = store.StatusFailed
 			res.Error = err.Error()
-			res.Log = buf.String()
 			res.EndedAt = time.Now()
 			return res, err
 		}
@@ -64,7 +63,6 @@ func Run(ctx context.Context, cfg KubeConfig, p store.Project, imageRef string, 
 			if err := waitForRollout(ctx, cfg, spec, logw); err != nil {
 				res.Status = store.StatusFailed
 				res.Error = err.Error()
-				res.Log = buf.String()
 				res.EndedAt = time.Now()
 				return res, err
 			}
@@ -73,7 +71,6 @@ func Run(ctx context.Context, cfg KubeConfig, p store.Project, imageRef string, 
 		if err := runLocalK3s(ctx, cfg, p, imageRef, logw); err != nil {
 			res.Status = store.StatusFailed
 			res.Error = err.Error()
-			res.Log = buf.String()
 			res.EndedAt = time.Now()
 			return res, err
 		}
@@ -81,7 +78,6 @@ func Run(ctx context.Context, cfg KubeConfig, p store.Project, imageRef string, 
 		if err := runSSH(ctx, cfg, p, imageRef, logw); err != nil {
 			res.Status = store.StatusFailed
 			res.Error = err.Error()
-			res.Log = buf.String()
 			res.EndedAt = time.Now()
 			return res, err
 		}
@@ -90,7 +86,6 @@ func Run(ctx context.Context, cfg KubeConfig, p store.Project, imageRef string, 
 	}
 
 	res.Status = store.StatusSuccess
-	res.Log = buf.String()
 	res.EndedAt = time.Now()
 	return res, nil
 }

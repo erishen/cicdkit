@@ -107,6 +107,7 @@ curl http://localhost:8080/api/health
 | `runner.docker_host` | `DOCKER_HOST` | `""` | 传给 docker 的 `DOCKER_HOST` |
 | `runner.default_kubeconfig` | `KUBECONFIG` | `""` | 默认 kubeconfig 路径 |
 | `runner.work_dir` | — | `./work` | 工作目录 |
+| `runner.log_dir` | `RUNNER_LOG_DIR` | `""` | 每次运行的全量日志目录（`run-<id>.log`）。留空表示 `<data_dir>/logs`；日志实时追加、崩溃后仍完整，`store.json` 只保留 256KB 截断尾巴 |
 
 示例见 [`config.example.json`](./config.example.json)。
 
@@ -175,6 +176,7 @@ curl http://localhost:8080/api/health
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/api/health` | 健康检查 |
+| GET | `/metrics` | Prometheus 文本格式指标（不鉴权、只读，见下「可观测性」） |
 | GET | `/api/projects` | 项目列表 |
 | POST | `/api/projects` | 新建项目 |
 | POST | `/api/projects/scan` | 从目录探测草稿（见下「从目录导入」） |
@@ -186,6 +188,7 @@ curl http://localhost:8080/api/health
 | GET / POST | `/api/projects/{id}/probe` | 服务可用性探测（类似 Postman：发 HTTP 请求，返回状态码 / 耗时 / 响应头 / 响应体） |
 | GET | `/api/runs?project_id=` | 运行列表 |
 | GET / POST | `/api/runs/{id}` / `/api/runs/{id}/cancel` | 运行详情 / 取消 |
+| GET | `/api/runs/{id}/log?from=<字节偏移>` | 增量日志尾巴：只返回 `from` 之后的新字节，另带 `total_len` / `status` / `stages` / `probe` / `diagnosis` / `reset`。`reset=true` 表示存储日志被截断，客户端须先清空已渲染缓冲（见下「运行日志」） |
 | GET | `/api/deployments?project_id=` | 部署历史 |
 | POST | `/api/webhook/{id}?secret=` | Webhook 触发流水线 |
 
@@ -332,6 +335,38 @@ make image     # 构建镜像（镜像内已完成前端构建与嵌入）
 
 ---
 
+## 运行日志（外置文件 + 增量拉取）
+
+每次运行都把**全量日志**实时追加到 `<runner.log_dir>/run-<id>.log`（默认 `./data/logs/`）。文件实时落盘，因此崩溃时最多丢掉 store 的 200ms 合并窗口——与 `store.json` 不同，日志文件已含每一行输出。`store.json` 只保留约 256KB 的截断尾巴（`Run.Log`）作为轻量摘要和 AI 诊断 / 知识库的回退；有外置文件时 `Run.LogPath` 指向完整日志。本功能之前创建的旧运行 `LogPath` 为空，会透明地回退到库内 `Log`。
+
+日志弹窗轮询 `GET /api/runs/{id}/log?from=<字节偏移>`：服务端只返回 `from` 之后的新字节（按 UTF-8 字符边界对齐），长构建因此是增量流式拉取而非反复下载整份日志。当日志从头被截断、或客户端偏移越过文件末尾时，响应置 `reset=true`，客户端须先清空已渲染缓冲再追加。
+
+删除运行时会同步删除其日志文件；日志文件通过 `*.log` / `/data/logs/` 被 git 忽略。
+
+---
+
+## 可观测性（Prometheus）
+
+`GET /metrics` 暴露 Prometheus 文本格式指标，全部从内存 store 现场派生（不新增常驻后台状态）。标签只用有限枚举——`status ∈ {queued,running,success,failed,canceled}`、`result ∈ {ok,fail,err,skip}`——绝不含项目名、镜像名、日志文本或 client IP，因此这个不鉴权端点不会泄露高基数数据。
+
+| 指标 | 类型 | 含义 |
+|------|------|------|
+| `cicdkit_active_runs` | gauge | 当前 running / queued 运行数 |
+| `cicdkit_max_concurrent` | gauge | 并发上限 |
+| `cicdkit_runs_total{status}` | gauge | 保留历史里按状态计数的运行（历史窗口，非累计终生值） |
+| `cicdkit_deploys_total` | gauge | 保留的部署记录数（历史窗口） |
+| `cicdkit_probe_total{result}` | gauge | 保留部署的探测结果计数 |
+| `cicdkit_build_seconds` | histogram | 构建阶段耗时（固定桶 10–3600 秒） |
+| `cicdkit_deploy_seconds` | histogram | 部署阶段耗时（固定桶 10–3600 秒） |
+
+该端点不鉴权（只读，与 `/api/health` 同等定位），且**不发布宿主端口**。`docker-compose.yml` 加入共享外部网络 `cicd-monitor`，由 [tsm-hub](../tsm-hub) 的 Prometheus 容器通过容器 DNS（`http://cicdkit:8080/metrics`）抓取。执行 `docker compose up` 前先创建该网络一次：
+
+```bash
+docker network create cicd-monitor    # 幂等
+```
+
+---
+
 ## 安全提示
 
 > ⚠️ 本平台会在**宿主机**执行 `docker` / `kubectl`，因此「能调 API」≈「能在宿主机跑命令」。
@@ -341,6 +376,9 @@ make image     # 构建镜像（镜像内已完成前端构建与嵌入）
   请求头 `X-API-Token: <令牌>` 或 `Authorization: Bearer <令牌>`。未配置 `API_TOKEN` 时
   `/api` 完全开放——**仅限本机开发**。一旦把 `server.addr` 绑到非本机（如 `0.0.0.0`），
   务必同时设置 `API_TOKEN`，否则等价于开放远程命令执行（RCE）。
+- **`/metrics` 刻意不鉴权且只读**（同 `/api/health`）：只暴露有限枚举的计数器 / 仪表 / 直方图，
+  绝不含项目名、日志或密钥。请让它仅在内部 `cicd-monitor` Docker 网络可达——**不要**把该端口
+  发布到宿主或公网。
 - **一键免配鉴权（`auto_token`）**：若嫌手动设 `API_TOKEN` 麻烦，可设 `AUTO_TOKEN=1`（或
   `server.auto_token: true`）。启动时会用 `crypto/rand` 生成一个一次性强令牌，注入 Web UI——
   **本机浏览器打开页面即自动鉴权，无需手动输入**；Token 同时打印到日志，供其他设备/脚本使用。

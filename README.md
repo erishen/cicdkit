@@ -127,6 +127,7 @@ Config precedence: **command-line `-config` file < environment variable override
 | `runner.docker_host` | `DOCKER_HOST` | `""` | `DOCKER_HOST` passed to docker |
 | `runner.default_kubeconfig` | `KUBECONFIG` | `""` | Default kubeconfig path |
 | `runner.work_dir` | — | `./work` | Working directory |
+| `runner.log_dir` | `RUNNER_LOG_DIR` | `""` | Full per-run log directory (`run-<id>.log`). Empty means `<data_dir>/logs`; logs are appended in real time and survive a crash, while `store.json` keeps only a capped 256 KB tail |
 
 See [`config.example.json`](./config.example.json) for an example.
 
@@ -195,6 +196,7 @@ Corresponding endpoint: `POST /api/projects/scan`, request body is one of — `{
 | Method | Path | Notes |
 |--------|------|-------|
 | GET | `/api/health` | Health check |
+| GET | `/metrics` | Prometheus text-format metrics (unauthenticated, read-only; see "Observability" below) |
 | GET | `/api/projects` | Project list |
 | POST | `/api/projects` | Create project |
 | POST | `/api/projects/scan` | Detect draft from directory (see "Import from Directory" above) |
@@ -206,6 +208,7 @@ Corresponding endpoint: `POST /api/projects/scan`, request body is one of — `{
 | GET / POST | `/api/projects/{id}/probe` | Service availability probe (like Postman: sends HTTP request, returns status code / latency / response headers / body) |
 | GET | `/api/runs?project_id=` | Run list |
 | GET / POST | `/api/runs/{id}` / `/api/runs/{id}/cancel` | Run detail / cancel |
+| GET | `/api/runs/{id}/log?from=<byteOffset>` | Incremental log tail: returns only bytes after `from`, plus `total_len` / `status` / `stages` / `probe` / `diagnosis` / `reset`. `reset=true` means the stored log was truncated and the client must clear its buffer first (see "Run Logs" below) |
 | GET | `/api/deployments?project_id=` | Deployment history |
 | POST | `/api/webhook/{id}?secret=` | Webhook-triggered pipeline |
 
@@ -350,6 +353,38 @@ If a project to be released lacks a `Dockerfile` or `k8s/deployment.yaml`, click
 
 ---
 
+## Run Logs (External Files + Incremental Tail)
+
+Every run writes its full, append-only log to `<runner.log_dir>/run-<id>.log` (default `./data/logs/`). The file is flushed in real time, so a crash loses at most the store's 200 ms flush window — unlike `store.json`, the log already holds every emitted line. `store.json` keeps only a capped ~256 KB tail (`Run.Log`) as a lightweight summary and as the fallback for AI diagnosis / the knowledge base; `Run.LogPath` points at the full file when present. Older runs created before this feature have an empty `LogPath` and transparently fall back to the in-store `Log`.
+
+The log modal polls `GET /api/runs/{id}/log?from=<byteOffset>`: the server returns **only** the bytes after `from` (aligned to a UTF-8 rune boundary), so long builds stream incrementally instead of re-downloading the whole log. When the log is truncated from the head or the client's offset falls past the end, the response sets `reset=true` and the client clears its rendered buffer before appending.
+
+Removed runs also delete their log file; log files are gitignored via `*.log` / `/data/logs/`.
+
+---
+
+## Observability (Prometheus)
+
+`GET /metrics` exposes Prometheus text-format metrics, derived live from the in-memory store (no extra background state). Labels use only bounded enums — `status ∈ {queued,running,success,failed,canceled}`, `result ∈ {ok,fail,err,skip}` — never project names, image names, log text or client IPs, so the unauthenticated endpoint cannot leak high-cardinality data.
+
+| Metric | Type | Meaning |
+|--------|------|---------|
+| `cicdkit_active_runs` | gauge | Runs currently running or queued |
+| `cicdkit_max_concurrent` | gauge | Concurrency limit |
+| `cicdkit_runs_total{status}` | gauge | Retained runs by status (history window, not lifetime) |
+| `cicdkit_deploys_total` | gauge | Retained deployment records (history window) |
+| `cicdkit_probe_total{result}` | gauge | Post-deploy probe outcomes (retained deployments) |
+| `cicdkit_build_seconds` | histogram | Build-stage durations (fixed buckets 10–3600 s) |
+| `cicdkit_deploy_seconds` | histogram | Deploy-stage durations (fixed buckets 10–3600 s) |
+
+The endpoint is unauthenticated (read-only, same posture as `/api/health`) and **does not publish a host port**. `docker-compose.yml` joins the shared external network `cicd-monitor`, so the Prometheus container in [tsm-hub](../tsm-hub) scrapes cicdkit over container DNS (`http://cicdkit:8080/metrics`). Create the network once before `docker compose up`:
+
+```bash
+docker network create cicd-monitor    # idempotent
+```
+
+---
+
 ## Security Notes
 
 > ⚠️ This platform executes `docker` / `kubectl` on the **host**, so "can call the API" ≈ "can run commands on the host".
@@ -359,6 +394,9 @@ If a project to be released lacks a `Dockerfile` or `k8s/deployment.yaml`, click
   request header `X-API-Token: <token>` or `Authorization: Bearer <token>`. When `API_TOKEN` is not configured
   `/api` is fully open — **local dev only**. Once you bind `server.addr` to non-localhost (e.g. `0.0.0.0`),
   be sure to also set `API_TOKEN`, otherwise it equals open remote command execution (RCE).
+- **`/metrics` is deliberately unauthenticated and read-only** (like `/api/health`): it exposes only bounded-enum
+  counters/gauges/histograms, never project names, logs or secrets. Keep it reachable only on the internal
+  `cicd-monitor` Docker network — do **not** publish its port to the host or the public internet.
 - **One-click no-config auth (`auto_token`)**: if manually setting `API_TOKEN` is a hassle, set `AUTO_TOKEN=1` (or
   `server.auto_token: true`). At startup a one-time strong token is generated with `crypto/rand` and injected into the Web UI —
   **the page auto-authenticates when opened locally, no manual input**; the token is also printed to logs for other devices/scripts.

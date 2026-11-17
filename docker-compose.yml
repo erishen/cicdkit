@@ -48,6 +48,12 @@ services:
     command: ["-addr", ":8080", "-config", "/app/data/config.json"]
     ports:
       - "127.0.0.1:10081:8080"
+    # 加入跨项目共享的外部网络 cicd-monitor，让 tsm-hub 的 Prometheus 容器
+    # 能通过容器 DNS `cicdkit` 解析到本容器并抓取 /metrics（不走宿主端口）。
+    # 该网络需先存在：`docker network create cicd-monitor`（一次性）。
+    networks:
+      - default
+      - cicd-monitor
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       # .env 故意挂到 /app/secrets/.env（非 Go LoadDotEnv 搜索路径），由入口脚本导出；
@@ -68,3 +74,11 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
+
+# 跨项目共享的外部网络：让 tsm-hub 的 Prometheus 容器解析到 cicdkit。
+# 需先创建一次：docker network create cicd-monitor（幂等，已存在则跳过）。
+# 与 tsm-hub/docker-compose.yml 里声明的同名 external 网络是同一个网络。
+networks:
+  cicd-monitor:
+    external: true
+    name: cicd-monitor

@@ -118,13 +118,48 @@ func (r *Runner) start(projectID, trigger, tag string, withDeploy bool, method, 
 // happened inside the goroutine, leaving a window where Cancel reported
 // "not found").
 func (r *Runner) launch(run store.Run, p store.Project, doBuild, doDeploy bool, method, targetName string) (*store.Run, error) {
-	ctl := newRunCtl(run, r.store)
+	// Open the run's external full-log file. Every log line is appended to it in
+	// real time, so the log outlives a crash (store.json's 400ms flush window
+	// can still lose data on SIGKILL, but the log file already has it). The
+	// in-memory Run.Log stays a capped summary. Best-effort: if the log dir
+	// cannot be created (read-only fs, permission), the run still proceeds with
+	// in-store logging only — the platform must not fail a build because log
+	// redirection failed.
+	logFile, logPath, _ := r.openRunLog(run.ID)
+	if logPath != "" {
+		run.LogPath = logPath
+	}
+	ctl := newRunCtlWithLog(run, r.store, logFile)
 	if err := r.store.SaveRun(run); err != nil {
+		if logFile != nil {
+			_ = logFile.Close()
+		}
 		return nil, err
 	}
 	r.active.Store(run.ID, ctl)
 	go r.execute(ctl, p, doBuild, doDeploy, method, targetName)
 	return &run, nil
+}
+
+// openRunLog creates <log_dir>/run-<id>.log for appending. log_dir comes from
+// config.Runner.LogDir (defaulting to <data_dir>/logs). Returns the open file
+// (nil when logging is not possible), the on-disk path ("" on failure), and any
+// error. The caller keeps the file open for the run's lifetime; runCtl closes
+// it at the terminal state.
+func (r *Runner) openRunLog(runID string) (*os.File, string, error) {
+	logDir := r.cfg.EffectiveLogDir()
+	if logDir == "" {
+		return nil, "", fmt.Errorf("log dir not configured")
+	}
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		return nil, "", err
+	}
+	path := filepath.Join(logDir, "run-"+runID+".log")
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return nil, "", err
+	}
+	return f, path, nil
 }
 
 // execute runs the pipeline stages for a single run. method, when non-empty and

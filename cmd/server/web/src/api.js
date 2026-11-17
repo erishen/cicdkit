@@ -116,6 +116,8 @@ const API = {
     request('/api/projects/' + id + '/' + action, { method: 'POST', ...jsonBody(body || {}) }),
   listRuns: (opts) => request('/api/runs' + pageQuery(opts)),
   getRun: (id) => request('/api/runs/' + id),
+  // 增量日志尾部：from 是已渲染长度（字节）。首次传 0（返回最后 256KB 并 reset=true）。
+  getRunLog: (id, from) => request('/api/runs/' + id + '/log?from=' + from),
   cancelRun: (id) => request('/api/runs/' + id + '/cancel', { method: 'POST', ...jsonBody({}) }),
   // 一键清空（带确认在前端）：DELETE 会清空全局历史，不可撤销。
   clearRuns: () => request('/api/runs', { method: 'DELETE' }),

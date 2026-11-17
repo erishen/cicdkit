@@ -104,6 +104,19 @@ func (s ServerConfig) IsLoopback() bool {
 	return ip != nil && ip.IsLoopback()
 }
 
+// EffectiveLogDir returns where per-run log files live, defaulting to
+// <data_dir>/logs so an unset LogDir still lands next to store.json.
+func (c *Config) EffectiveLogDir() string {
+	if c.Runner.LogDir != "" {
+		return c.Runner.LogDir
+	}
+	dir := c.DataDir
+	if dir == "" {
+		dir = "./data"
+	}
+	return filepath.Join(dir, "logs")
+}
+
 // RunnerConfig controls concurrency and the toolchain environment used by
 // build/deploy engines.
 type RunnerConfig struct {
@@ -111,6 +124,12 @@ type RunnerConfig struct {
 	DockerHost        string `json:"docker_host"`
 	DefaultKubeconfig string `json:"default_kubeconfig"`
 	WorkDir           string `json:"work_dir"`
+	// LogDir is where per-run full logs are written as append files
+	// (run-<id>.log). Empty means <data_dir>/logs. Keeping logs outside
+	// store.json means the store stays small and a log outlives a crash:
+	// the store's last 400ms flush window is still lost on SIGKILL, but the
+	// log file already has every emitted line.
+	LogDir string `json:"log_dir"`
 }
 
 // Default returns a configuration with sensible built-in defaults.
@@ -165,6 +184,9 @@ func applyEnv(cfg *Config) {
 	}
 	if v := os.Getenv("DATA_DIR"); v != "" {
 		cfg.DataDir = v
+	}
+	if v := os.Getenv("RUNNER_LOG_DIR"); v != "" {
+		cfg.Runner.LogDir = v
 	}
 	if v := os.Getenv("STORE_FILE"); v != "" {
 		cfg.StoreFile = v
